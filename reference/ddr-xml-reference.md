@@ -215,6 +215,62 @@ Buttons live inside `<GroupButtonObj>` elements (not `<Object type="Button">`):
 </Object>
 ```
 
+### Conditional Formatting
+
+Layout objects can have conditional formatting rules that change visual appearance based on a formula:
+
+```xml
+<Object type="Field" name="budget_total" ...>
+  <FieldObj ...>...</FieldObj>
+  <ConditionalFormatting>
+    <Condition type="Formula">
+      <Calculation>
+        <Text>Budget::total &gt; Budget::paid</Text>
+      </Calculation>
+      <Format>
+        <FillColor value="#FF0000"/>
+        <TextColor value="#FFFFFF"/>
+      </Format>
+    </Condition>
+    <Condition type="Formula">
+      <Calculation>
+        <Text>Budget::total = Budget::paid</Text>
+      </Calculation>
+      <Format>
+        <FillColor value="#00FF00"/>
+      </Format>
+    </Condition>
+  </ConditionalFormatting>
+</Object>
+```
+
+- Multiple `<Condition>` elements per object (evaluated in order, first match wins)
+- `<Format>` children vary: `FillColor`, `TextColor`, `FontStyle` (Bold/Italic), etc.
+- Formula text uses the same calculation syntax as field calculations and scripts
+- Business logic is frequently embedded here: financial thresholds, status pipelines, urgency countdowns
+
+### Hide Object When
+
+Any layout object can have a visibility condition — a formula that hides the object when true:
+
+```xml
+<Object type="Field" name="price_column" ...>
+  <FieldObj ...>...</FieldObj>
+  <HideCondition>
+    <Calculation>
+      <Text>$$USER_privgroup ≠ "[Full Access]"</Text>
+    </Calculation>
+  </HideCondition>
+</Object>
+```
+
+- Single formula per object (no multiple conditions)
+- When formula evaluates to true (non-zero), the object is hidden
+- Heavily used for: role-based access control, progressive disclosure, workflow state machines, platform detection
+- Authorization logic is frequently implemented here rather than in privilege sets
+
+**Migration importance:** These formulas often encode the application's entire authorization model and workflow state machines — business logic invisible in the data model and scripts.
+
 ### Object types reference
 | Type | What it is | Extract? |
 |---|---|---|

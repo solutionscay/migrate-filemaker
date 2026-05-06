@@ -284,6 +284,8 @@ class DDRFile:
         self.privileges = []
         self.custom_functions = []
         self.external_data_sources = []
+        self.conditional_formatting = []
+        self.hide_conditions = []
 
     def parse_all(self):
         """Parse all catalogs from this file."""
@@ -292,12 +294,28 @@ class DDRFile:
         self.table_occurrences = self._parse_table_occurrences()
         self.relationships = self._parse_relationships()
         self.layouts = self._parse_layouts()
+        self._extract_ui_logic()
         self.scripts = self._parse_scripts()
         self.value_lists = self._parse_value_lists()
         self.accounts, self.privileges = self._parse_accounts()
         self.custom_functions = self._parse_custom_functions()
         self.external_data_sources = self._parse_external_data_sources()
         return self
+
+    def _extract_ui_logic(self):
+        """Extract conditional formatting and hide-object-when from parsed layouts."""
+        for layout in self.layouts:
+            layout_name = layout.get("name", "")
+            for cf in layout.get("conditional_formatting", []):
+                entry = dict(cf)
+                entry["layout"] = layout_name
+                self._inject_source(entry)
+                self.conditional_formatting.append(entry)
+            for hc in layout.get("hide_conditions", []):
+                entry = dict(hc)
+                entry["layout"] = layout_name
+                self._inject_source(entry)
+                self.hide_conditions.append(entry)
 
     def _inject_source(self, item):
         """Add source_file to a parsed item."""
@@ -480,10 +498,13 @@ class DDRFile:
         fields_shown = []
         portals = []
         buttons = []
+        cond_formatting = []
+        hide_conditions = []
 
         def walk(el):
             if el.tag == "Object":
                 otype = el.get("type", "")
+                obj_name = el.get("name", "")
                 if otype == "Field":
                     fref = extract_field_from_obj(el)
                     if fref:
@@ -502,6 +523,36 @@ class DDRFile:
                                     "field": f.get("name", ""),
                                 })
                         portals.append({"table": portal_table, "fields": portal_fields})
+
+                # Conditional formatting — on any Object
+                cf_el = el.find("ConditionalFormatting")
+                if cf_el is not None:
+                    for cond in cf_el.findall("Condition"):
+                        formula = get_calculation(cond)
+                        if formula:
+                            actions = []
+                            fmt = cond.find("Format")
+                            if fmt is not None:
+                                for child_fmt in fmt:
+                                    actions.append(child_fmt.tag)
+                            cond_formatting.append({
+                                "object_name": obj_name or "",
+                                "object_type": otype,
+                                "condition_type": cond.get("type", ""),
+                                "formula": formula,
+                                "format_actions": actions,
+                            })
+
+                # Hide Object When — on any Object
+                hide_el = el.find("HideCondition")
+                if hide_el is not None:
+                    formula = get_calculation(hide_el)
+                    if formula:
+                        hide_conditions.append({
+                            "object_name": obj_name or "",
+                            "object_type": otype,
+                            "formula": formula,
+                        })
 
             elif el.tag == "GroupButtonObj":
                 step = el.find("Step")
@@ -544,6 +595,8 @@ class DDRFile:
         l["fields"] = unique_fields
         l["portals"] = portals
         l["buttons"] = unique_buttons
+        l["conditional_formatting"] = cond_formatting
+        l["hide_conditions"] = hide_conditions
 
         self._inject_source(l)
         return l
@@ -883,6 +936,8 @@ class DDRMerger:
                     "scripts": len(ddr.scripts),
                     "value_lists": len(ddr.value_lists),
                     "custom_functions": len(ddr.custom_functions),
+                    "conditional_formatting": len(ddr.conditional_formatting),
+                    "hide_conditions": len(ddr.hide_conditions),
                 },
                 "external_data_sources": ddr.external_data_sources,
             }
@@ -993,7 +1048,10 @@ class DDRMerger:
     def merge_layouts(self):
         merged = []
         for ddr in self.files:
-            merged.extend(ddr.layouts)
+            for layout in ddr.layouts:
+                out = {k: v for k, v in layout.items()
+                       if k not in ("conditional_formatting", "hide_conditions")}
+                merged.append(out)
         return merged
 
     def merge_scripts(self):
@@ -1039,6 +1097,18 @@ class DDRMerger:
             merged.extend(ddr.custom_functions)
         return merged
 
+    def merge_conditional_formatting(self):
+        merged = []
+        for ddr in self.files:
+            merged.extend(ddr.conditional_formatting)
+        return merged
+
+    def merge_hide_conditions(self):
+        merged = []
+        for ddr in self.files:
+            merged.extend(ddr.hide_conditions)
+        return merged
+
     def merge_all(self, output_dir):
         """Run all merges and write all spec files."""
         os.makedirs(output_dir, exist_ok=True)
@@ -1072,6 +1142,12 @@ class DDRMerger:
         functions = self.merge_custom_functions()
         write_json(output_dir, "08_custom_functions", functions)
 
+        cond_fmt = self.merge_conditional_formatting()
+        write_json(output_dir, "09_conditional_formatting", cond_fmt)
+
+        hide_conds = self.merge_hide_conditions()
+        write_json(output_dir, "10_hide_object_when", hide_conds)
+
         return {
             "topology": topology,
             "tables": tables,
@@ -1083,6 +1159,8 @@ class DDRMerger:
             "accounts": accounts,
             "privileges": privileges,
             "custom_functions": functions,
+            "conditional_formatting": cond_fmt,
+            "hide_conditions": hide_conds,
         }
 
 
@@ -1136,6 +1214,8 @@ if __name__ == "__main__":
             print(f"    Value lists: {len(ddr.value_lists)}")
             print(f"    Custom functions: {len(ddr.custom_functions)}")
             print(f"    External data sources: {len(ddr.external_data_sources)}")
+            print(f"    Conditional formatting rules: {len(ddr.conditional_formatting)}")
+            print(f"    Hide-object-when rules: {len(ddr.hide_conditions)}")
 
         unresolved = results["topology"]["unresolved_references"]
         if unresolved:
@@ -1152,3 +1232,5 @@ if __name__ == "__main__":
     print(f"    Accounts: {len(results['accounts'])}")
     print(f"    Privilege sets: {len(results['privileges'])}")
     print(f"    Custom functions: {len(results['custom_functions'])}")
+    print(f"    Conditional formatting rules: {len(results['conditional_formatting'])}")
+    print(f"    Hide-object-when rules: {len(results['hide_conditions'])}")
