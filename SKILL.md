@@ -4,13 +4,17 @@ description: >
   Guide a full migration from FileMaker Pro to an open-source stack. Includes a built-in DDR
   parser that extracts structured specs from FileMaker Database Design Report XML exports.
   Parses the DDR, discovers requirements, recommends a tech stack, and generates a detailed
-  rebuild plan with SQL schema and API design.
+  rebuild plan with SQL schema and API design. Use when the user provides a FileMaker DDR XML
+  export or directory, asks to migrate a FileMaker app, requests FileMaker-to-SQL/API/UI
+  planning, or wants modernization recommendations for a FileMaker solution.
 argument-hint: [path-to-ddr-xml-or-directory]
 ---
 
 # FileMaker Migration Planner
 
 Orchestrate a complete migration from a FileMaker Pro solution to a modern open-source stack. This skill runs in four phases, each producing a checkpoint file so work can be resumed across sessions.
+
+This skill targets Claude Code and assumes Claude Code interactive question tools are available.
 
 **Reference documents** (consult these during analysis):
 - [FileMaker Concepts → Modern Equivalents](reference/filemaker-concepts.md)
@@ -27,6 +31,8 @@ Orchestrate a complete migration from a FileMaker Pro solution to a modern open-
 - [templates/04_database_schema.sql](templates/04_database_schema.sql)
 - [templates/05_api_design.md](templates/05_api_design.md)
 - [templates/06_ui_spec.md](templates/06_ui_spec.md)
+- [templates/07_business_logic.md](templates/07_business_logic.md)
+- [templates/08_auth_roles.md](templates/08_auth_roles.md)
 
 ---
 
@@ -43,10 +49,17 @@ migration/
   04_database_schema.sql   ← Phase 4 output
   05_api_design.md         ← Phase 4 output
   06_ui_spec.md            ← Phase 4 output
+  07_business_logic.md     ← Phase 4 output
+  08_auth_roles.md         ← Phase 4 output
 ```
 
 If a phase's output file exists, ask:
 > "Phase N (description) appears complete — I found `migration/NN_filename.md`. Would you like to review it, redo it, or continue to Phase N+1?"
+
+**Redo cascading:** If the user chooses to redo a phase, warn them before proceeding:
+> "Redoing Phase N will make the outputs from Phase N+1 onward stale — they were generated from the previous answers. I'll redo this phase, then list which downstream files still exist so you can decide whether to regenerate them."
+
+After redoing, check which downstream checkpoint files still exist and ask: "These files reflect the old answers — would you like to regenerate them now, or review them first?"
 
 Resume from the earliest incomplete phase.
 
@@ -65,19 +78,22 @@ python3 --version 2>/dev/null || python --version 2>/dev/null
 If neither command succeeds, stop and tell the user:
 > "The DDR parser requires Python (3.6+). Please install Python and try again — on macOS: `brew install python3`, on Ubuntu/Debian: `sudo apt install python3`."
 
-Run the built-in DDR parser to extract specs from the DDR XML. The parser auto-detects multi-file solutions — if the directory contains multiple `FMPReport type="Report"` XMLs, all are parsed and merged:
+Run the built-in DDR parser to extract specs from the DDR XML. Always pass `ddr/specs` as the output directory so downstream steps find the files in the expected location. The parser auto-detects multi-file solutions — if the directory contains multiple `FMPReport type="Report"` XMLs, all are parsed and merged:
 
 ```bash
-python3 ~/.claude/skills/migrate-filemaker/scripts/parse_ddr.py $ARGUMENTS
+python3 ~/.claude/skills/migrate-filemaker/scripts/parse_ddr.py "$ARGUMENTS" ddr/specs
 ```
 
 If the script is not at the personal skills path, try the project-local path:
 
 ```bash
-python3 .claude/skills/migrate-filemaker/scripts/parse_ddr.py $ARGUMENTS
+python3 .claude/skills/migrate-filemaker/scripts/parse_ddr.py "$ARGUMENTS" ddr/specs
 ```
 
-If `specs/` already exists with all 9 JSON files (including `00_topology.json`), skip parsing and use the existing specs. Confirm with the user: "Found existing specs — using those. Re-run the parser if you want fresh extraction."
+If neither path contains the parser, stop and tell the user:
+> "The DDR parser script could not be found. Expected locations: `~/.claude/skills/migrate-filemaker/scripts/parse_ddr.py` or `.claude/skills/migrate-filemaker/scripts/parse_ddr.py`. Please ensure the migrate-filemaker skill is installed correctly and try again."
+
+If `ddr/specs/` already exists with all 11 JSON files (including `00_topology.json`, `09_conditional_formatting.json`, and `10_hide_object_when.json`), skip parsing and use the existing specs. Confirm with the user: "Found existing specs — using those. Re-run the parser if you want fresh extraction."
 
 ### Step 1.2: Verify Extraction Quality
 
@@ -95,7 +111,7 @@ If any check fails, report the issue and ask whether to continue or fix first.
 
 ### Step 1.3: Analyze & Produce App Summary
 
-Read all 8 spec files and produce `migration/00_app_summary.md` using the template structure. The analysis must include:
+Read all spec files (01 through 08, plus 09 and 10 if they contain data) and produce `migration/00_app_summary.md` using the template structure. The analysis must include:
 
 **Application Profile:**
 - Derive the app name from the DDR filename or table naming patterns
@@ -137,39 +153,50 @@ Read all 8 spec files and produce `migration/00_app_summary.md` using the templa
 - Container fields (file storage)
 - Cross-file script calls (scripts calling into other FM files — tightly coupled multi-file logic)
 - Unresolved external file references (DDR missing for a referenced file)
+- Heavy conditional formatting / hide-object-when rules (check `09_conditional_formatting.json` and `10_hide_object_when.json` counts) — these often encode authorization models, workflow state machines, and business rules invisible in the data model. If counts are significant (>100 rules), recommend running the Conditional Formatting and Hide-Object-When Explorer workflows for deep analysis.
 
 **Specialized Business Logic Detection:**
 
-Most scripts in a FileMaker solution are generic app plumbing (navigation, CRUD, dialogs, simple approval flows) that can be recreated from the app type and data model alone. But some scripts contain domain-specific logic that is unique to the business — pricing algorithms, compliance rules, custom allocation engines, etc. These need special attention during migration because they can't be inferred.
-
-Detect specialized business logic scripts using these signals (in priority order):
-
-1. **Custom function calls in script calculations** — Cross-reference the custom functions spec (`08_custom_functions.json`) against script step calculations. If a script's Set Variable or Set Field calculations reference custom functions by name, flag it. Custom functions are almost always purpose-built domain logic.
-2. **ExecuteSQL steps** — Any script containing an ExecuteSQL step is doing hand-crafted data operations beyond standard FileMaker. Always flag.
-3. **Multi-table writes** — If a script does Set Field against 3+ different base tables (resolve table occurrences to base tables), it's orchestrating a multi-entity transaction. Flag it.
-4. **Calculation density** — If >40% of a script's steps are Set Variable/Set Field with non-trivial calculations (containing math operators like `+`, `-`, `*`, `/`, or functions like `Round`, `Case` with multiple branches, nested function calls), it's implementing an algorithm, not plumbing.
-
-**Filter out plumbing before scoring** — exclude scripts matching these patterns:
-- Script groups named: Navigation, Nav, UI, Utility, Debug, Startup, Triggers, or similar
-- Script names matching: "Go To", "Navigate", "Open", "Close", "Toggle", "Show", "Hide", "Refresh"
-- Scripts that are only Perform Script calls (dispatchers/routers)
-- Scripts where all steps are navigation + one dialog
-
-**Group flagged scripts by functional domain** (using script group paths and table targets) and present them in the app summary as a dedicated section:
-
-> **Specialized Business Logic**
->
-> Found N scripts across M functional areas that contain domain-specific logic requiring careful migration:
->
-> 1. **[Domain name]** — N scripts, references custom functions `FuncA`, `FuncB`. [Brief description of what the logic appears to do based on function names, field targets, and calculation content.]
-> 2. **[Domain name]** — N scripts with ExecuteSQL-based [operation]. Writes across tables: X, Y, Z.
-> 3. ...
->
-> These will be explored in detail during Discovery.
-
-If no specialized business logic is detected, note: "No specialized business logic detected — all scripts appear to be standard app plumbing that can be recreated from the data model and app type."
+Scan scripts for domain-specific logic that can't be inferred from the app type. See [reference/business-logic-detection.md](reference/business-logic-detection.md) for detection signals, plumbing filters, and the required output format. Present findings as a "Specialized Business Logic" section in the app summary, or note none found.
 
 Present the summary to the user before proceeding.
+
+---
+
+## Optional: Deep Exploration
+
+After Phase 1, before Phase 2, run any combination of explorers to build deeper intelligence before discovery and planning. Each explorer processes its items one-at-a-time with model intelligence, writes per-group CSV catalogs, and concludes with written reports. All explorers are incremental — run a batch at a time, or `all` to process everything, or `reports` to generate reports from completed CSVs.
+
+**When to run explorers:** For Complex or Enterprise applications, running explorers before Phase 2 makes discovery conversations significantly more informed and Phase 4 planning more precise. For Simple or Medium apps, the Phase 1 summary is usually sufficient.
+
+Nothing is dismissed across any explorer. Every item gets a documented row. Ambiguous items are flagged for human review. Items that aren't needed for migration are documented in a noise or utility catalog — not silently dropped.
+
+---
+
+### Script Explorer
+For deep script analysis, read [workflows/fm-script-explorer.md](workflows/fm-script-explorer.md) and follow its methodology with input mode `count`, `all`, or `reports`. Produces per-folder CSV catalogs + six reports in `migration/fm-scripts-explorer/`. **Run when:** >50 scripts (Complex/Enterprise).
+
+---
+
+### Conditional Formatting Explorer
+When Phase 1 finds significant conditional formatting rules, read [workflows/fm-cf-explorer.md](workflows/fm-cf-explorer.md) and follow its methodology with input mode `count`, `all`, or `reports`. Produces per-layout CSV catalogs + three reports in `migration/fm-cf-explorer/`. These formulas encode financial thresholds, status pipelines, and authorization states invisible in the data model.
+
+---
+
+### Hide-Object-When Explorer
+When Phase 1 finds hide-object-when rules, read [workflows/fm-hide-explorer.md](workflows/fm-hide-explorer.md) and follow its methodology with input mode `count`, `all`, or `reports`. Produces per-layout CSV catalogs + four reports in `migration/fm-hide-explorer/`. These rules frequently encode the full authorization model and workflow state machines.
+
+---
+
+### Calculated Fields Explorer
+When Phase 1 detects specialized business logic or significant calculated field counts, read [workflows/fm-calc-explorer.md](workflows/fm-calc-explorer.md) and follow its methodology with input mode `count`, `all`, or `reports`. Produces per-table CSV catalogs + three reports in `migration/fm-calc-explorer/`.
+
+---
+
+### Custom Functions Explorer
+When the solution has any custom functions, read [workflows/fm-func-explorer.md](workflows/fm-func-explorer.md) and follow its methodology with input mode `count`, `all`, or `reports`. Produces a single CSV + three reports in `migration/fm-func-explorer/`. Custom functions are the shared logic layer called from scripts, calculated fields, and layout formulas.
+
+---
 
 ---
 
@@ -319,6 +346,23 @@ Generate the detailed rebuild artifacts. Consult the reference documents for tra
 - [Script Translation Patterns](reference/script-translation-patterns.md) for business logic mapping
 - [FileMaker Concepts](reference/filemaker-concepts.md) for concept mapping
 
+### Before Generating: Confirm the Plan
+
+Before writing any file, confirm with the user what Phase 4 will produce:
+
+> "I'm ready to generate the Phase 4 artifacts:
+>
+> - `03_migration_plan.md` — phased build plan with effort estimates and risk register
+> - `04_database_schema.sql` — schema builder (confirms decisions with you before writing)
+> - `05_api_design.md` — RESTful endpoints plus custom business logic endpoints
+> - `06_ui_spec.md` — UI spec builder (full page inventory, component mapping, form specs)
+> - `07_business_logic.md` — script categorization and specialized logic translation
+> - `08_auth_roles.md` — privilege set mapping and access control model
+>
+> Shall I proceed?"
+
+Incorporate any feedback, then proceed.
+
 ### 4.1: Migration Plan (`migration/03_migration_plan.md`)
 
 Using the template, produce:
@@ -331,17 +375,9 @@ Using the template, produce:
 
 ### 4.2: Database Schema (`migration/04_database_schema.sql`)
 
-Generate production-ready SQL DDL:
-- For multi-file solutions, unify tables from all source files into a single database schema (use `source_file` to understand table ownership, but the target DB is one schema)
-- Use the schema translation guide for type mapping
-- Convert FM naming conventions (camelCase/spaces) to snake_case
-- Add proper primary keys (`id SERIAL PRIMARY KEY` or `id UUID ...`)
-- Add `created_at` and `updated_at` timestamps to all tables
-- Create foreign key constraints from the relationships spec
-- Create indexes for foreign keys and commonly-queried fields
-- Add ENUM types or reference tables for value lists
-- Include comments on columns derived from FM calculated fields (noting they become app logic)
-- Skip globals-only tables (note them as application config)
+Read [workflows/fm-schema-builder.md](workflows/fm-schema-builder.md) and follow its methodology to generate the database schema. It reads `ddr/specs/` and the tech stack choice from `migration/02_recommendations.md`, presents all key schema decisions for user confirmation, and writes `migration/04_database_schema.sql`.
+
+See [workflows/fm-schema-builder.md](workflows/fm-schema-builder.md) for the full generation methodology.
 
 ### 4.3: API Design (`migration/05_api_design.md`)
 
@@ -352,15 +388,25 @@ Using the template, produce:
 - **Batch/import endpoints** if data migration is needed
 - Group endpoints by domain (matching the feature map from Phase 1)
 
-### 4.4: Business Logic Mapping
+### 4.4: Business Logic Mapping (`migration/07_business_logic.md`)
 
-Within the migration plan, categorize every script (or script group) as one of:
+**If Script Explorer was run** (`migration/fm-scripts-explorer/` exists): read the CSV catalogs and reports — especially `reports/summary.md`, `reports/tier1-critical.md`, and `reports/data-writes.md`. Use the per-script classifications (type, logic_tier) to drive categorization instead of re-analyzing raw scripts. The explorer's module assignments, backbone script identification, and "hardest to migrate" analysis should directly inform this document.
+
+Using [templates/07_business_logic.md](templates/07_business_logic.md), produce `migration/07_business_logic.md` with two sections:
+
+**Section 1 — Script Categorization**
+
+Categorize every script (or script group) as one of:
 - **Drop:** Navigation-only scripts, UI helpers that the new framework handles
 - **API Endpoint:** Scripts that perform data operations triggered by user action
 - **Service Function:** Background logic, validation rules, calculations
 - **UI Handler:** Client-side logic (form validation, conditional visibility)
 
-**Specialized business logic scripts** (flagged in Phase 1, explored in Phase 2 Group 7) get additional treatment beyond categorization. For each flagged domain:
+Present as a table grouped by domain: `Script Group | Script Name | Category | Notes`.
+
+**Section 2 — Specialized Logic Detail**
+
+For each specialized business logic domain flagged in Phase 1 and explored in Phase 2 Group 7:
 
 1. **Document the business rules** in plain language using the user's descriptions from Discovery
 2. **Trace the script logic** — walk through the actual parsed steps and calculations to produce pseudocode or a logic flowchart that captures the algorithm
@@ -368,28 +414,23 @@ Within the migration plan, categorize every script (or script group) as one of:
 4. **Specify the implementation target** — where this logic lives in the new system (database function, service layer function, API middleware, etc.) with enough detail that a developer can implement it without referencing the original FileMaker scripts
 5. **Flag any ambiguity** — if the parsed script logic doesn't fully match the user's description from Discovery, or if calculations are too opaque to confidently translate, note it as requiring manual verification during implementation
 
-### 4.5: Auth & Roles Mapping
+### 4.5: Auth & Roles Mapping (`migration/08_auth_roles.md`)
 
-Map FileMaker privilege sets to the new system's role model:
-- Each privilege set → a role with defined permissions
-- Map record-level access rules to row-level security or middleware checks
-- Map layout access to route/page permissions
+**If Hide-Object-When Explorer was run** (`migration/fm-hide-explorer/` exists): read `reports/summary.md` and `reports/auth-model.md`. These contain the full authorization model extracted from hide-object-when formulas — often more complete than the privilege set catalog alone, because FM developers frequently implement fine-grained access control through hide conditions rather than privilege sets.
+
+Using [templates/08_auth_roles.md](templates/08_auth_roles.md), produce `migration/08_auth_roles.md` with:
+- **Role definitions** — each FM privilege set mapped to a named role with its permission boundaries
+- **Record-level access** — row-level security rules or middleware checks derived from FM record access privileges
+- **Route/page permissions** — FM layout access restrictions mapped to route guards
+- **Authorization layer map** — if the Hide-Object-When Explorer identified multiple authorization layers (role checks, permission flags, record sensitivity, SQL-based checks), document each layer explicitly and map it to its modern equivalent (middleware, store guard, component-level conditional, database RLS policy)
+- **Session variables** — any `$$` globals used as permission state, with their modern equivalents (session store, JWT claims, server-side session)
+- **Open questions** — any privilege rules that are ambiguous or require business clarification before implementation
 
 ### 4.6: UI Spec (`migration/06_ui_spec.md`)
 
-Using the template, produce a complete frontend specification that a developer can build from without referencing any other document. Draw from:
-- **Discovery Group 3** (UI Style & Design) for design direction, screenshots, and reference apps
-- **Phase 1 layout analysis** for the page inventory and component mapping
-- **Phase 1 script analysis** for UI handlers and conditional logic
-- [FileMaker Concepts](reference/filemaker-concepts.md) for FM-to-modern UI element mapping
+Read [workflows/fm-ui-spec.md](workflows/fm-ui-spec.md) and follow its methodology to generate the frontend specification. It reads the discovery answers, layout specs, and Hide-Object-When / Conditional Formatting Explorer reports (if run), then writes `migration/06_ui_spec.md` — a complete page inventory, component mapping, form specs, and responsive requirements.
 
-The spec must include:
-- **Design direction** summarizing the target visual style, referencing any screenshots or apps the user provided
-- **Navigation structure** derived from FM menu layouts and script navigation patterns
-- **Page inventory** mapping every user-facing FM layout to a route, component name, and page type
-- **Component mapping** translating FM UI elements (portals, tab controls, slide controls, pop-overs, value lists) to their modern equivalents with notes on behavior
-- **Form specs** for each data-entry layout: field-by-field with input type, validation rules, source (FM field or calculation), and any conditional visibility logic
-- **Responsive requirements** based on the access patterns from Discovery Group 2
+See [workflows/fm-ui-spec.md](workflows/fm-ui-spec.md) for the full specification methodology.
 
 ### Present Final Deliverables
 
@@ -404,6 +445,8 @@ migration/
   04_database_schema.sql   ← Database DDL
   05_api_design.md         ← API endpoint design
   06_ui_spec.md            ← Frontend UI specification
+  07_business_logic.md     ← Script categorization & specialized logic
+  08_auth_roles.md         ← Role definitions & access control model
 ```
 
 Suggest next steps:

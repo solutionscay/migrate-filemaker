@@ -36,9 +36,9 @@
 <!-- Generate one section per real table. Group by domain if modular monolith. -->
 
 <!-- GENERATION INSTRUCTIONS (for the AI generating this file):
-1. Read `specs/01_tables.json` — create CRUD endpoints for each real table
-2. Read `specs/03_relationships.json` — create nested endpoints for parent-child
-3. Read `specs/05_scripts.json` — create custom endpoints for business-logic scripts
+1. Read `ddr/specs/01_tables.json` — create CRUD endpoints for each real table
+2. Read `ddr/specs/03_relationships.json` — create nested endpoints for parent-child
+3. Read `ddr/specs/05_scripts.json` — create custom endpoints for business-logic scripts
 4. Read Phase 3 recommendations for domain grouping
 5. Note required roles from privilege set mapping
 -->

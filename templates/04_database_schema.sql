@@ -7,7 +7,7 @@
 
 -- GENERATION INSTRUCTIONS (for the AI generating this file):
 --
--- 1. Read `specs/01_tables.json` — only create tables for entries with schema
+-- 1. Read `ddr/specs/01_tables.json` — only create tables for entries with schema
 --    fields (skip globals-only tables).
 --
 -- 2. For each table:
@@ -21,13 +21,13 @@
 --    g. Add UNIQUE for fields with "unique value" validation
 --    h. Add CHECK constraints for fields with range validation
 --
--- 3. Read `specs/03_relationships.json` — create foreign keys:
+-- 3. Read `ddr/specs/03_relationships.json` — create foreign keys:
 --    a. Only for equi-join relationships (operator "=")
 --    b. Add ON DELETE CASCADE if relationship has "delete_related"
 --    c. Add ON DELETE SET NULL for optional relationships
 --    d. Skip inequality/Cartesian joins (these become queries, not constraints)
 --
--- 4. Read `specs/06_value_lists.json` — for custom value lists:
+-- 4. Read `ddr/specs/06_value_lists.json` — for custom value lists:
 --    a. Create ENUM types for short stable lists
 --    b. Create reference tables for user-managed or long lists
 --
