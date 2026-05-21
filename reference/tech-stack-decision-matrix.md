@@ -16,8 +16,8 @@ FileMaker itself is a monolith. Replacing it with a separate frontend + backend 
 
 1. Read the app complexity score and feature map from Phase 1
 2. Read the user's preferences and constraints from Phase 2
-3. **Start from the MVC-first default path.** Look for reasons to deviate — not reasons to stay.
-4. If the user stated a preference in Phase 2, weight it heavily — user familiarity beats theoretical advantage. But if they said "prefer React" without a specific reason, probe: ask what problem they're trying to solve that requires it.
+3. **The first branch is coding mode — AI or human.** That determines everything downstream.
+4. For the human/hybrid path, use WebSearch to pull current data before recommending. Do not rely on training knowledge alone — framework ecosystems move. Show the user what you found and let them decide.
 
 ---
 
@@ -47,23 +47,46 @@ FileMaker itself is a monolith. Replacing it with a separate frontend + backend 
 
 ## Full-Stack Framework (The Primary Decision)
 
-This is the most important choice. For most FileMaker migrations, this single decision covers backend, ORM, auth, admin, migrations, email, background jobs, testing, and rendering — in one package.
+This is the most important choice. The right answer depends first on **who is writing the code**.
 
-### The Default Path: Full-Stack MVC Frameworks
+---
 
-| Framework | Language | Built-In | Admin Panel | Background Jobs | When to Choose |
-|---|---|---|---|---|---|
-| **Django** | Python | Auth, ORM, migrations, email, testing | `django.contrib.admin` — auto-generated from models | Celery (add-on, near-universal) | Team knows Python, or no strong language preference |
-| **Laravel** | PHP | Auth (Breeze/Jetstream), ORM (Eloquent), migrations, email, queues | Filament (free/OSS) or Nova | Laravel Queues (built-in) | Team knows PHP, or PHP hosting is required |
-| **Rails** | Ruby | Auth (Devise gem), ORM (ActiveRecord), migrations, email, jobs (Sidekiq) | ActiveAdmin or Avo | Active Job + Sidekiq | Team knows Ruby |
+### Path A — AI / Vibe-Coded
 
-**All three frameworks require 2–3 decisions before feature work begins:** which database, which deployment target, and (for Django/Rails) which auth library. Everything else is included or has one de facto standard. A React SPA requires 12–15+ decisions before the first feature is written.
+AI-generated code excels with full-stack MVC frameworks. There is one obvious way to do everything: one ORM, one migration command, one auth library, one admin panel. AI doesn't have to choose between Redux and Zustand, or decide whether to put data fetching in `useEffect` or `useQuery`. It just follows the framework's conventions.
 
-### Selection Guide
+AI-generated React code almost universally misuses `useEffect`, optimistic updates, and client-side cache invalidation — producing apps that pass development but fail in production.
 
-1. **Match team language first.** If the team writes Python, use Django. If PHP, use Laravel. If Ruby, use Rails.
-2. **If no language preference:** Django is the default recommendation. It is the most explicit framework (explicit is better than implicit), has the best built-in admin panel for internal tools, and Python is the most broadly known language.
-3. **For internal tools and B2B SaaS** (which describes almost every FileMaker migration): server-rendered templates with Hotwire (Rails), Livewire (Laravel), or HTMX (Django) cover 95% of interactivity needs with no client-side state management burden.
+**For AI-coded projects, go straight to the MVC giants:**
+
+| Framework | Language | Built-In | Admin Panel | Background Jobs |
+|---|---|---|---|---|
+| **Django** | Python | Auth, ORM, migrations, email, testing | `django.contrib.admin` — auto-generated from models | Celery (add-on, near-universal) |
+| **Laravel** | PHP | Auth (Breeze/Jetstream), ORM (Eloquent), migrations, email, queues | Filament (free/OSS) or Nova | Laravel Queues (built-in) |
+| **Rails** | Ruby | Auth (Devise gem), ORM (ActiveRecord), migrations, email, jobs (Sidekiq) | ActiveAdmin or Avo | Active Job + Sidekiq |
+
+All three require 2–3 decisions before feature work begins. A React SPA requires 12–15+.
+
+**Selection for AI path:** match team language. If no preference, default to Django — Python is the most broadly known language and Django's explicit conventions produce consistent AI output.
+
+---
+
+### Path B — Human / Hybrid
+
+Ask the team what language they write. Then **use WebSearch** to pull current, real-world data before recommending anything. Do not rely on training knowledge — framework ecosystems shift. Search for:
+
+- `"[language] web framework 2025 production"`
+- `"[framework A] vs [framework B] 2025"`
+- Stack Overflow Developer Survey results for that language
+- GitHub star trajectory and recent commit activity for the top candidates
+
+Present what you find in plain language: community size, production adoption, recent momentum, any notable concerns (maintenance risk, breaking changes, corporate backing changes). Let the user weigh in. The goal is that they feel like they researched this and made an informed decision — not that they accepted a default.
+
+**After presenting findings, apply the same MVC-first filter:** among the well-supported options for their language, prefer the full-stack MVC framework over the API-only microframework. A well-maintained full-stack framework beats a bare API framework every time for this class of application.
+
+---
+
+### Interactivity Without a Separate Frontend
 
 ### Interactivity Without a Separate Frontend
 
@@ -179,19 +202,24 @@ Only recommend microservices if the user explicitly has multiple teams, independ
 ## Quick Decision Flowchart
 
 ```
-Start here: Is there a documented reason to use a separate frontend?
-(Native mobile app, offline-first PWA, real-time collaborative editing, or
- team deeply invested in React/Vue with no retraining appetite)
-├── No (the common case) → Full-Stack MVC Monolith
-│     Does the team have a language preference?
-│     ├── Python → Django + PostgreSQL + HTMX/Alpine + Django auth + PaaS
-│     ├── PHP   → Laravel + PostgreSQL + Livewire/Alpine + Breeze + PaaS
-│     ├── Ruby  → Rails + PostgreSQL + Hotwire + Devise + PaaS
-│     └── None  → Django + PostgreSQL + HTMX/Alpine + Django auth + PaaS
-└── Yes (rare, must be documented) → API + Separate Frontend
-      What justified it?
-      ├── Native mobile → Django/Laravel API + React Native or Flutter
-      ├── Real-time collaborative → Rails + ActionCable or Django Channels + React
-      ├── Offline PWA → FastAPI/Django + Vue or Svelte (lighter state burden than React)
-      └── Team knows React → Django/Laravel API + React (enforce TypeScript + React Query)
+Who is writing this?
+│
+├── AI / Vibe-coded
+│     Need real-time collab or native mobile?
+│     ├── No → Full-Stack MVC Giant. Match team language:
+│     │         Python → Django + PostgreSQL + HTMX/Alpine + Django auth + PaaS
+│     │         PHP    → Laravel + PostgreSQL + Livewire/Alpine + Breeze + PaaS
+│     │         Ruby   → Rails + PostgreSQL + Hotwire + Devise + PaaS
+│     │         None   → Django + PostgreSQL + HTMX/Alpine + Django auth + PaaS
+│     └── Yes → MVC API backend + document what justified a separate frontend
+│
+└── Human / Hybrid
+      What language does the team write?
+      → WebSearch: "[language] web framework 2025 production"
+      → Present findings to user (community, adoption, momentum, risks)
+      → User picks from informed options
+      │
+      Need real-time collab or native mobile?
+      ├── No → Full-stack MVC framework in their language (prefer the giant)
+      └── Yes → MVC API + separate frontend, document the justification
 ```

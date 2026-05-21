@@ -236,10 +236,27 @@ Record which screenshots were provided and note key observations: layout density
 ### Group 4 — Technical Preferences
 
 Ask about:
-1. **Team skills:** What languages/frameworks does your team know? (Python, PHP, Ruby, JavaScript/TypeScript, Go, etc.)
-2. **Stack preferences:** Any strong preferences or hard requirements? (e.g., must use PostgreSQL, need Docker, specific cloud provider, or a framework the team already knows)
+1. **Coding mode:** Who is primarily writing this — AI-generated (vibe-coded), human developers, or a hybrid?
+2. **Stack preferences:** Any hard requirements? (e.g., must use PostgreSQL, specific cloud provider, Docker required)
 3. **Deployment target:** Cloud (which provider?), on-premise, or hybrid?
 4. **Separate frontend need:** Is there a specific reason you'd need a separate frontend app — such as a native mobile app, offline access, or real-time collaborative editing? (Most internal tools and B2B apps don't need one.)
+
+**Based on the coding mode answer, branch here:**
+
+**If AI / vibe-coded:**
+> "AI-generated code works best with full-stack MVC frameworks — Django, Laravel, and Rails. These have one obvious way to do everything: one ORM, one migration tool, one auth library. AI-generated React code almost universally misuses state management and data fetching in ways that appear to work in development but fail under real conditions. We'll use an MVC framework. The only remaining question is which language fits your team."
+Skip to the language sub-question in the decision matrix. Do not ask about separate frontend preference unless real-time collab or native mobile came up in Groups 1–3.
+
+**If human / hybrid:**
+> "What language does your team primarily write in?"
+
+Then use the WebSearch tool to pull current, real-world data before recommending anything. Search for:
+- `"[language] web framework 2025 most popular production"`
+- `"[framework A] vs [framework B] 2025"`
+- Stack Overflow Developer Survey current year results for that language's top frameworks
+- GitHub star history and recent commit activity for the top 2–3 candidates
+
+Present the search findings to the user in plain language — community size, production adoption, recent momentum, any notable concerns — and let them weigh in before you make a recommendation. The goal is that they feel like they researched this, not that they accepted your default.
 
 ### Group 5 — Constraints
 
