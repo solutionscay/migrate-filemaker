@@ -38,20 +38,27 @@ This skill targets Claude Code and assumes Claude Code interactive question tool
 
 ## Before Starting: Check for Previous Progress
 
-Before running any phase, check which checkpoint files already exist:
+Before running any phase, check which checkpoint files and explorer directories already exist:
 
 ```
 migration/
-  00_app_summary.md        ← Phase 1 output
-  01_discovery_answers.md  ← Phase 2 output
-  02_recommendations.md    ← Phase 3 output
-  03_migration_plan.md     ← Phase 4 output
-  04_database_schema.sql   ← Phase 4 output
-  05_api_design.md         ← Phase 4 output
-  06_ui_spec.md            ← Phase 4 output
-  07_business_logic.md     ← Phase 4 output
-  08_auth_roles.md         ← Phase 4 output
+  00_app_summary.md          ← Phase 1 output
+  fm-scripts-explorer/       ← Phase 1.5 output (Script Explorer)
+  fm-cf-explorer/            ← Phase 1.5 output (CF Explorer)
+  fm-hide-explorer/          ← Phase 1.5 output (Hide-Object-When Explorer)
+  fm-calc-explorer/          ← Phase 1.5 output (Calculated Fields Explorer)
+  fm-func-explorer/          ← Phase 1.5 output (Custom Functions Explorer)
+  01_discovery_answers.md    ← Phase 2 output
+  02_recommendations.md      ← Phase 3 output
+  03_migration_plan.md       ← Phase 4 output
+  04_database_schema.sql     ← Phase 4 output
+  05_api_design.md           ← Phase 4 output
+  06_ui_spec.md              ← Phase 4 output
+  07_business_logic.md       ← Phase 4 output
+  08_auth_roles.md           ← Phase 4 output
 ```
+
+If `00_app_summary.md` exists but `01_discovery_answers.md` does not, Phase 1.5 (Deep Exploration) is the next step — not Phase 2. Check which explorer directories already exist and run only the missing ones before proceeding to discovery.
 
 If a phase's output file exists, ask:
 > "Phase N (description) appears complete — I found `migration/NN_filename.md`. Would you like to review it, redo it, or continue to Phase N+1?"
@@ -163,40 +170,55 @@ Present the summary to the user before proceeding.
 
 ---
 
-## Optional: Deep Exploration
+## Phase 1.5: Deep Exploration (Required Gate)
 
-After Phase 1, before Phase 2, run any combination of explorers to build deeper intelligence before discovery and planning. Each explorer processes its items one-at-a-time with model intelligence, writes per-group CSV catalogs, and concludes with written reports. All explorers are incremental — run a batch at a time, or `all` to process everything, or `reports` to generate reports from completed CSVs.
+**Do not start Phase 2 until all applicable explorers are complete.**
 
-**When to run explorers:** For Complex or Enterprise applications, running explorers before Phase 2 makes discovery conversations significantly more informed and Phase 4 planning more precise. For Simple or Medium apps, the Phase 1 summary is usually sufficient.
+Run all explorers that have data. This is not optional — the explorers extract the information that makes Phase 2 discovery meaningful and Phase 4 planning precise. Script categories, the auth model, business logic thresholds, and custom function translations are all in hand before you ask the user a single question. There is no downside to running them.
 
-Nothing is dismissed across any explorer. Every item gets a documented row. Ambiguous items are flagged for human review. Items that aren't needed for migration are documented in a noise or utility catalog — not silently dropped.
+Each explorer is incremental — run a batch at a time (`count` to see what's there, `all` to process everything, `reports` to generate reports from completed CSVs). All items get a documented row. Nothing is silently dropped.
 
----
-
-### Script Explorer
-For deep script analysis, read [workflows/fm-script-explorer.md](workflows/fm-script-explorer.md) and follow its methodology with input mode `count`, `all`, or `reports`. Produces per-folder CSV catalogs + six reports in `migration/fm-scripts-explorer/`. **Run when:** >50 scripts (Complex/Enterprise).
+Check which explorers apply based on the Phase 1 summary, then run each one:
 
 ---
 
-### Conditional Formatting Explorer
-When Phase 1 finds significant conditional formatting rules, read [workflows/fm-cf-explorer.md](workflows/fm-cf-explorer.md) and follow its methodology with input mode `count`, `all`, or `reports`. Produces per-layout CSV catalogs + three reports in `migration/fm-cf-explorer/`. These formulas encode financial thresholds, status pipelines, and authorization states invisible in the data model.
+### Script Explorer — Always Run
+Read [workflows/fm-script-explorer.md](workflows/fm-script-explorer.md) and follow its methodology. Produces per-folder CSV catalogs + six reports in `migration/fm-scripts-explorer/`. Every migration has scripts. Run this first — the script categorization feeds directly into Phase 4 business logic mapping.
 
 ---
 
-### Hide-Object-When Explorer
-When Phase 1 finds hide-object-when rules, read [workflows/fm-hide-explorer.md](workflows/fm-hide-explorer.md) and follow its methodology with input mode `count`, `all`, or `reports`. Produces per-layout CSV catalogs + four reports in `migration/fm-hide-explorer/`. These rules frequently encode the full authorization model and workflow state machines.
+### Conditional Formatting Explorer — Run If Any CF Rules Found
+Read [workflows/fm-cf-explorer.md](workflows/fm-cf-explorer.md) and follow its methodology. Produces per-layout CSV catalogs + three reports in `migration/fm-cf-explorer/`. CF formulas encode financial thresholds, status pipelines, and authorization states that are invisible in the data model. Skip only if Phase 1 found zero CF rules.
 
 ---
 
-### Calculated Fields Explorer
-When Phase 1 detects specialized business logic or significant calculated field counts, read [workflows/fm-calc-explorer.md](workflows/fm-calc-explorer.md) and follow its methodology with input mode `count`, `all`, or `reports`. Produces per-table CSV catalogs + three reports in `migration/fm-calc-explorer/`.
+### Hide-Object-When Explorer — Run If Any Rules Found
+Read [workflows/fm-hide-explorer.md](workflows/fm-hide-explorer.md) and follow its methodology. Produces per-layout CSV catalogs + four reports in `migration/fm-hide-explorer/`. These rules frequently encode the full authorization model and workflow state machines. Skip only if Phase 1 found zero hide-object-when rules.
 
 ---
 
-### Custom Functions Explorer
-When the solution has any custom functions, read [workflows/fm-func-explorer.md](workflows/fm-func-explorer.md) and follow its methodology with input mode `count`, `all`, or `reports`. Produces a single CSV + three reports in `migration/fm-func-explorer/`. Custom functions are the shared logic layer called from scripts, calculated fields, and layout formulas.
+### Calculated Fields Explorer — Run If Any Calculated Fields Found
+Read [workflows/fm-calc-explorer.md](workflows/fm-calc-explorer.md) and follow its methodology. Produces per-table CSV catalogs + three reports in `migration/fm-calc-explorer/`. Skip only if all tables have zero calculated fields.
 
 ---
+
+### Custom Functions Explorer — Run If Any Custom Functions Found
+Read [workflows/fm-func-explorer.md](workflows/fm-func-explorer.md) and follow its methodology. Produces a single CSV + three reports in `migration/fm-func-explorer/`. Custom functions are the shared logic layer called from scripts, calculated fields, and layout formulas. Skip only if the solution has zero custom functions.
+
+---
+
+When all applicable explorers are complete, present a brief summary to the user:
+
+> "Deep exploration complete. Here's what the explorers found:
+> - Scripts: [N scripts across N groups — key findings]
+> - Conditional formatting: [N rules — notable patterns]
+> - Hide-object-when: [N rules — auth model notes]
+> - Calculated fields: [N fields — business logic detected]
+> - Custom functions: [N functions — shared logic]
+>
+> Ready to start Phase 2 discovery."
+
+If the user closed the session after Phase 1 and is resuming, check which explorer output directories already exist (`migration/fm-scripts-explorer/`, `migration/fm-cf-explorer/`, etc.) and skip completed explorers. Only run what's missing.
 
 ---
 
