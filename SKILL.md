@@ -236,9 +236,10 @@ Record which screenshots were provided and note key observations: layout density
 ### Group 4 — Technical Preferences
 
 Ask about:
-1. **Team skills:** What languages/frameworks does your team know? (Python, JavaScript/TypeScript, Go, etc.)
-2. **Stack preferences:** Any strong preferences or requirements? (e.g., must use PostgreSQL, prefer React, need Docker)
+1. **Team skills:** What languages/frameworks does your team know? (Python, PHP, Ruby, JavaScript/TypeScript, Go, etc.)
+2. **Stack preferences:** Any strong preferences or hard requirements? (e.g., must use PostgreSQL, need Docker, specific cloud provider, or a framework the team already knows)
 3. **Deployment target:** Cloud (which provider?), on-premise, or hybrid?
+4. **Separate frontend need:** Is there a specific reason you'd need a separate frontend app — such as a native mobile app, offline access, or real-time collaborative editing? (Most internal tools and B2B apps don't need one.)
 
 ### Group 5 — Constraints
 
@@ -297,13 +298,17 @@ Produce `migration/02_recommendations.md` using the template structure:
 
 ### 3.1: Tech Stack Selection
 
+The default is a **full-stack MVC monolith** (Django, Laravel, or Rails). These frameworks cover database, ORM, auth, admin, migrations, email, background jobs, and server-rendered UI in a single package — 2–3 decisions before writing features, not 12–15. This is the right default for almost every FileMaker migration: internal tools, B2B SaaS, single-team applications.
+
+Only recommend a separate frontend (React, Vue, Svelte) if discovery answers document a specific need: native mobile app, offline-first PWA, real-time collaborative editing, or a team already deeply invested in a JS framework. "It's what everyone uses" is not a reason.
+
 For each layer, recommend a **primary** choice and one **alternative**, with reasoning:
 
-- **Database:** PostgreSQL vs. MySQL vs. SQLite — based on complexity, scale, feature needs
-- **Backend Framework:** Based on team skills, complexity, ecosystem
-- **Frontend Framework:** Based on UI complexity, mobile needs, team skills
-- **Authentication:** Based on security model complexity, user count
-- **Deployment:** Based on budget, scale, team ops experience
+- **Database:** PostgreSQL vs. MySQL vs. SQLite — based on complexity, scale, feature needs. PostgreSQL is the default.
+- **Full-Stack Framework:** Django (Python), Laravel (PHP), or Rails (Ruby) — match team language. Django if no preference. If a separate frontend is genuinely justified, recommend an MVC API backend + frontend framework combination and document what justified the split.
+- **Interactivity layer:** For MVC monoliths — HTMX/Alpine.js (Django/Laravel) or Hotwire (Rails). Only recommend a full JS framework if the separate frontend case is met.
+- **Authentication:** Based on the FM security model and deployment context. Default to framework built-in auth.
+- **Deployment:** Based on budget, scale, team ops experience. PaaS (Railway, Render) is the default.
 
 ### 3.2: Architecture Pattern
 

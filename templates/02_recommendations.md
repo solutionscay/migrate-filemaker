@@ -11,26 +11,26 @@
 | **Choice** | <!-- e.g., PostgreSQL --> | <!-- e.g., MySQL --> |
 | **Why** | <!-- 2-3 sentences justifying the choice based on app complexity, scale, features needed --> | <!-- Why this is a viable alternative --> |
 
-### Backend Framework
+### Full-Stack Framework
 
 | | Primary | Alternative |
 |---|---|---|
-| **Choice** | <!-- e.g., FastAPI (Python) --> | <!-- e.g., Express (Node.js) --> |
-| **Why** | <!-- Justification based on team skills, complexity, ecosystem --> | <!-- Alternative rationale --> |
+| **Choice** | <!-- e.g., Django (Python) --> | <!-- e.g., Laravel (PHP) --> |
+| **Why** | <!-- Justification based on team language preference, built-in capabilities (ORM, auth, admin, migrations, email, jobs), and why a full-stack MVC monolith fits this app. If a separate frontend was justified by discovery answers, document what justified it here. --> | <!-- Alternative rationale --> |
 
-### Frontend
+### Interactivity / UI Layer
 
 | | Primary | Alternative |
 |---|---|---|
-| **Choice** | <!-- e.g., React + Tailwind --> | <!-- e.g., Vue + Vuetify --> |
-| **Why** | <!-- Justification based on UI complexity, team skills, mobile needs, and the UI style preferences from Discovery Group 3 --> | <!-- Alternative rationale --> |
+| **Choice** | <!-- e.g., HTMX + Alpine.js (server-rendered) --> | <!-- e.g., Livewire (Laravel) or Hotwire (Rails) --> |
+| **Why** | <!-- For MVC monoliths: justify the server-rendering approach and which reactivity tool fits the UI complexity. If a separate JS frontend was justified, name it here and explain what specific need drove the decision (native mobile, offline, real-time collab, team expertise). --> | <!-- Alternative rationale --> |
 
 ### CSS / Component Library
 
 | | Primary | Alternative |
 |---|---|---|
-| **Choice** | <!-- e.g., Tailwind CSS + shadcn/ui --> | <!-- e.g., Bootstrap --> |
-| **Why** | <!-- Justification — must align with the user's stated UI style and reference apps from Discovery Group 3. E.g., if user wants "clean & minimal" and cited Linear as inspiration, recommend Tailwind + shadcn/ui over Bootstrap. --> | <!-- Alternative rationale --> |
+| **Choice** | <!-- e.g., Tailwind CSS --> | <!-- e.g., Bootstrap --> |
+| **Why** | <!-- Must align with the user's stated UI style and reference apps from Discovery Group 3. E.g., if user wants "clean & minimal", Tailwind gives full control. Bootstrap is closest to FM's built-in themes if familiarity matters. --> | <!-- Alternative rationale --> |
 
 ### Authentication
 
@@ -51,13 +51,13 @@
 ```
 ┌─────────────────────────────────────────┐
 │              Deployment                  │
-│  <!-- e.g., Railway / Docker -->         │
+│  <!-- e.g., Railway / Render / Docker -->│
 ├─────────────────────────────────────────┤
-│   Frontend: <!-- e.g., React -->         │
+│   Full-Stack Framework                   │
+│   <!-- e.g., Django + HTMX/Alpine -->    │
+│   <!-- or Laravel + Livewire/Alpine -->  │
+│   Auth: <!-- e.g., Django built-in -->   │
 │   CSS: <!-- e.g., Tailwind -->           │
-├─────────────────────────────────────────┤
-│   Backend: <!-- e.g., FastAPI -->        │
-│   Auth: <!-- e.g., JWT + sessions -->    │
 ├─────────────────────────────────────────┤
 │   Database: <!-- e.g., PostgreSQL -->    │
 └─────────────────────────────────────────┘
