@@ -21,7 +21,29 @@ Usage:
 import xml.etree.ElementTree as ET
 import json
 import os
+import re
 import sys
+
+
+# FileMaker occasionally emits raw C0 control characters inside <Data> elements.
+# They are invalid in XML 1.0 and expat rejects the whole file.
+_C0_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def parse_xml(path):
+    """Parse a DDR XML file, tolerating FileMaker's invalid control characters.
+
+    Observed in the wild: 8 raw 0x1E (RECORD SEPARATOR) bytes inside a <Data>
+    string. ET.parse raises "not well-formed (invalid token)" and, if the caller
+    swallows it, the entire file vanishes from the extraction with no warning.
+    """
+    with open(path, encoding="utf-16") as fh:
+        src = fh.read()
+    cleaned, n = _C0_RE.subn("", src)
+    if n:
+        print(f"  WARNING: stripped {n} invalid control char(s) from {os.path.basename(path)}",
+              file=sys.stderr)
+    return ET.ElementTree(ET.fromstring(cleaned))
 
 
 # ─── HELPERS (module-level, take explicit params) ────────────────────────────
@@ -29,27 +51,50 @@ import sys
 def get_calculation(parent):
     """Extract calculation text from a parent element.
 
-    This DDR version stores calculations in two forms:
-    - <Calculation><Text>...</Text></Calculation> (sometimes empty)
-    - <DisplayCalculation><Chunk>...</Chunk>...</DisplayCalculation> (reliable)
+    Verified against real DDR output (FileMaker 22, 36,051 <Calculation> elements):
 
-    We try Calculation > Text first, then fall back to DisplayCalculation > Chunk.
+    - <Calculation> holds the formula as DIRECT TEXT. It has no <Text> child --
+      0 of 36,051 did. Any code looking for Calculation/Text is dead code.
+    - <DisplayCalculation> is a chunked *rendering* of the same formula:
+        <Chunk type="NoRef">        operators/punctuation, payload in .text
+        <Chunk type="FunctionRef">  function names,        payload in .text
+        <Chunk type="FieldRef">     payload is a NESTED <Field table= name=/>,
+                                    and .text is EMPTY.
+      So joining only .text silently deletes every field operand, leaving a
+      syntactically plausible formula with its operands missing
+      ("Get ( AccountName ) <>" instead of
+       "Get ( AccountName ) <> Case_Notes::log_created_account").
+
+    Prefer <Calculation>'s direct text; fall back to a chunk walker that
+    resolves FieldRef children instead of dropping them.
     """
     calc = parent.find("Calculation")
-    if calc is not None:
-        text_el = calc.find("Text")
-        if text_el is not None and text_el.text and text_el.text.strip():
-            return text_el.text.strip()
+    if calc is not None and calc.text and calc.text.strip():
+        return calc.text.strip()
 
     dc = parent.find("DisplayCalculation")
-    if dc is not None:
-        chunks = dc.findall("Chunk")
-        if chunks:
-            text = "".join(c.text or "" for c in chunks).strip()
-            if text:
-                return text
+    if dc is None:
+        return None
 
-    return None
+    parts = []
+    for chunk in dc.findall("Chunk"):
+        is_fieldref = chunk.get("type") == "FieldRef"
+        # NoRef chunks carry authored whitespace that is part of the formula.
+        # A FieldRef's own whitespace is just pretty-printing around the child.
+        if chunk.text and (chunk.text.strip() or not is_fieldref):
+            parts.append(chunk.text)
+        for child in chunk:
+            if child.tag == "Field":
+                table, name = child.get("table"), child.get("name")
+                parts.append(f"{table}::{name}" if table else (name or ""))
+            elif child.text:
+                # Forward-compat: degrade rather than delete on unknown chunk shapes.
+                parts.append(child.text)
+            if child.tail and (child.tail.strip() or not is_fieldref):
+                parts.append(child.tail)
+
+    text = "".join(parts).strip()
+    return text or None
 
 
 def parse_field(field_el):
@@ -153,6 +198,16 @@ def parse_script_steps(step_list):
             "enable": step.get("enable", "True"),
         }
 
+        # StepText is FileMaker's own fully-rendered form of the step, e.g.
+        #   Set Field [ INTAKES::is_Closed; 1 ]
+        # The structured params below are an allow-list of ~10 child tags out of
+        # ~102 that actually occur, so 62% of steps otherwise emit no params at
+        # all -- losing dialog text, find queries, sort orders and return values.
+        # Keep the faithful rendering alongside whatever we can structure.
+        step_text = step.findtext("StepText")
+        if step_text and step_text.strip():
+            s["step_text"] = step_text.strip()
+
         # Collect relevant parameters
         params = {}
 
@@ -226,11 +281,15 @@ def find_ddr_reports(path):
                 continue
             full = os.path.join(path, f)
             try:
-                tree = ET.parse(full, parser=ET.XMLParser(encoding="utf-16"))
+                tree = parse_xml(full)
                 root = tree.getroot()
                 if root.tag == "FMPReport" and root.get("type") == "Report":
                     reports.append(full)
-            except Exception:
+            except Exception as exc:
+                # NEVER swallow this silently. A single malformed byte used to
+                # drop an entire DDR file (and 90% of an office's scripts) with
+                # no warning and exit 0.
+                print(f"  WARNING: could not parse {f}: {exc}", file=sys.stderr)
                 continue
 
         if reports:
@@ -268,7 +327,7 @@ class DDRFile:
         self.filepath = filepath
         self.filename = os.path.basename(filepath)
 
-        tree = ET.parse(filepath, parser=ET.XMLParser(encoding="utf-16"))
+        tree = parse_xml(filepath)
         root = tree.getroot()
         self.file_el = root.find("File")
         self.source_file = self.file_el.get("name", self.filename)
@@ -300,7 +359,87 @@ class DDRFile:
         self.accounts, self.privileges = self._parse_accounts()
         self.custom_functions = self._parse_custom_functions()
         self.external_data_sources = self._parse_external_data_sources()
+        self.verify()
         return self
+
+    # ─── SELF-CHECK ─────────────────────────────────────────────────────
+
+    def _count_catalog(self, catalog_tag, item_tag, skip_separators=False):
+        """Count definitions in a catalog, descending only through Groups.
+
+        Deliberately NOT ElementTree.iter(): a <Script> element also appears
+        inside script steps and button definitions as a *reference*. Counting
+        those would inflate the total ~6x and make this check useless.
+        """
+        catalog = self.file_el.find(catalog_tag)
+        if catalog is None:
+            return 0
+
+        def walk(el):
+            n = 0
+            for child in el:
+                if child.tag == item_tag:
+                    if skip_separators and (child.get("name") or "").strip() == "-":
+                        continue
+                    n += 1
+                elif child.tag == "Group":
+                    n += walk(child)
+            return n
+
+        return walk(catalog)
+
+    def _count_path(self, path):
+        return len(self.file_el.findall(path)) if self.file_el is not None else 0
+
+    def verify(self):
+        """Reconcile emitted counts against the raw XML and warn on mismatch.
+
+        Every silent-loss bug this parser has shipped produced *well-formed*
+        output -- an empty list, a truncated formula, a plausible count -- so
+        nothing downstream could detect it, and the losses were repeatedly
+        misattributed to FileMaker's exporter instead. A structural traversal
+        mistake is invisible without a ground-truth count to compare against.
+        That is what this is for. Keep it honest: compare to the RAW XML, never
+        to another parsed artifact.
+        """
+        checks = [
+            ("tables", len(self.tables), self._count_catalog("BaseTableCatalog", "BaseTable")),
+            ("table occurrences", len(self.table_occurrences),
+             self._count_path("RelationshipGraph/TableList/Table")),
+            ("relationships", len(self.relationships),
+             self._count_path("RelationshipGraph/RelationshipList/Relationship")),
+            ("layouts", len(self.layouts),
+             self._count_catalog("LayoutCatalog", "Layout", skip_separators=True)),
+            ("scripts", len(self.scripts),
+             self._count_catalog("ScriptCatalog", "Script", skip_separators=True)),
+            ("value lists", len(self.value_lists), self._count_path("ValueListCatalog/ValueList")),
+            ("accounts", len(self.accounts), self._count_path("AccountCatalog/Account")),
+            ("privilege sets", len(self.privileges),
+             self._count_path("PrivilegesCatalog/PrivilegeSet")),
+            ("custom functions", len(self.custom_functions),
+             self._count_path("CustomFunctionCatalog/CustomFunction")),
+        ]
+
+        problems = [(what, got, raw) for what, got, raw in checks if got != raw]
+        for what, got, raw in problems:
+            print(f"  WARNING: {what}: emitted {got}, raw XML defines {raw} "
+                  f"({raw - got:+d})", file=sys.stderr)
+
+        # A catalog that exists in the XML but yields nothing is the exact
+        # signature of a wrong tag name or a non-recursive findall.
+        for what, count, present in (
+            ("conditional formatting", len(self.conditional_formatting),
+             self._count_path(".//ConditionalFormatting")),
+            ("hide conditions", len(self.hide_conditions), self._count_path(".//HideCondition")),
+        ):
+            if present and not count:
+                print(f"  WARNING: {what}: extracted 0 rules but the XML contains "
+                      f"{present} blocks -- likely a wrong element name or a "
+                      f"non-recursive lookup", file=sys.stderr)
+
+        if not problems:
+            print("  self-check: emitted counts reconcile with raw XML")
+        return problems
 
     def _extract_ui_logic(self):
         """Extract conditional formatting and hide-object-when from parsed layouts."""
@@ -524,23 +663,35 @@ class DDRFile:
                                 })
                         portals.append({"table": portal_table, "fields": portal_fields})
 
-                # Conditional formatting — on any Object
+                # Conditional formatting — on any Object.
+                # Real shape (100% consistent in FileMaker 22 DDR output):
+                #   <ConditionalFormatting>
+                #     <Item id flags>
+                #       <Condition op="0"><Calculation>..</Calculation></Condition>
+                #       <Format><Styles><LocalCSS>..</LocalCSS></Styles></Format>
+                #     </Item>
+                # Condition is nested under <Item> (findall is non-recursive, so
+                # looking for it directly returned [] every time), the attribute
+                # is `op` not `type`, and Format is Condition's SIBLING, not its
+                # child. Getting all four wrong extracted exactly zero rules.
                 cf_el = el.find("ConditionalFormatting")
                 if cf_el is not None:
-                    for cond in cf_el.findall("Condition"):
-                        formula = get_calculation(cond)
-                        if formula:
-                            actions = []
-                            fmt = cond.find("Format")
-                            if fmt is not None:
-                                for child_fmt in fmt:
-                                    actions.append(child_fmt.tag)
+                    for item in cf_el.findall("Item"):
+                        fmt = item.find("Format")
+                        css = ""
+                        if fmt is not None:
+                            css = (fmt.findtext("Styles/LocalCSS") or "").strip()
+                        for cond in item.findall("Condition"):
+                            formula = get_calculation(cond)
+                            if not formula:
+                                continue
                             cond_formatting.append({
                                 "object_name": obj_name or "",
                                 "object_type": otype,
-                                "condition_type": cond.get("type", ""),
+                                "condition_type": cond.get("op", ""),
+                                "flags": item.get("flags", ""),
                                 "formula": formula,
-                                "format_actions": actions,
+                                "format_css": css,
                             })
 
                 # Hide Object When — on any Object
@@ -554,19 +705,25 @@ class DDRFile:
                             "formula": formula,
                         })
 
-            elif el.tag == "GroupButtonObj":
-                step = el.find("Step")
-                if step is not None:
+            # Buttons come in four flavours, not one. Handling only
+            # GroupButtonObj -- and only its DIRECT Step child -- missed 57% of
+            # button actions: plain ButtonObj carries the majority of real
+            # bindings, GroupButtonObj is often a container whose Step sits a
+            # level deeper, and PopoverButtonObj/ButtonBarObj were ignored
+            # outright. Search nested Steps across all four.
+            elif el.tag in ("GroupButtonObj", "ButtonObj", "PopoverButtonObj", "ButtonBarObj"):
+                for step in el.iter("Step"):
                     action = step.get("name", "")
+                    if not action:
+                        continue
+                    b = {"action": action, "button_type": el.tag}
                     script_ref = step.find("Script")
-                    b = {"action": action}
                     if script_ref is not None:
                         b["script"] = script_ref.get("name", "")
                     step_text = step.find("StepText")
                     if step_text is not None and step_text.text:
                         b["description"] = step_text.text.strip()
-                    if action:
-                        buttons.append(b)
+                    buttons.append(b)
 
             for c in el:
                 walk(c)
@@ -583,12 +740,15 @@ class DDRFile:
                 seen.add(key)
                 unique_fields.append(f)
 
-        # Deduplicate buttons
+        # Deduplicate buttons on (action, script). Keying on script alone
+        # collapses distinct actions that call no script -- and `.get("script",
+        # default)` returns "" rather than the default when the key exists but
+        # is empty, so scriptless buttons all collided on "".
         seen_btns = set()
         unique_buttons = []
         for b in buttons:
-            key = b.get("script", b.get("action", ""))
-            if key and key not in seen_btns:
+            key = (b.get("action", ""), b.get("script", ""))
+            if key[0] and key not in seen_btns:
                 seen_btns.add(key)
                 unique_buttons.append(b)
 
@@ -641,6 +801,23 @@ class DDRFile:
 
         scripts = []
 
+        def parse_script(script_el, current_path):
+            name = script_el.get("name", "")
+            # "-" is a visual separator in the script menu, not a script.
+            # _parse_layouts has always skipped these; scripts now match.
+            if name.strip() == "-":
+                return
+            script = {
+                "id": script_el.get("id"),
+                "name": name,
+                "group": current_path,
+                "in_menu": script_el.get("includeInMenu") == "True",
+            }
+            sl = script_el.find("StepList")
+            script["steps"] = parse_script_steps(sl)
+            self._inject_source(script)
+            scripts.append(script)
+
         def walk_group(group_el, path=""):
             group_name = group_el.get("name", "")
             current_path = f"{path}/{group_name}" if path else group_name
@@ -649,19 +826,18 @@ class DDRFile:
                 if child.tag == "Group":
                     walk_group(child, current_path)
                 elif child.tag == "Script":
-                    script = {
-                        "id": child.get("id"),
-                        "name": child.get("name"),
-                        "group": current_path,
-                        "in_menu": child.get("includeInMenu") == "True",
-                    }
-                    sl = child.find("StepList")
-                    script["steps"] = parse_script_steps(sl)
-                    self._inject_source(script)
-                    scripts.append(script)
+                    parse_script(child, current_path)
 
-        for group in catalog.findall("Group"):
-            walk_group(group)
+        # ScriptCatalog holds BOTH grouped scripts and scripts declared at its
+        # root. Descending only into Groups (the original bug) silently dropped
+        # every ungrouped script -- which is exactly where FileMaker developers
+        # put startup, login, routing and cross-cutting trigger logic.
+        # This mirrors _parse_layouts, which has always handled both.
+        for child in catalog:
+            if child.tag == "Group":
+                walk_group(child)
+            elif child.tag == "Script":
+                parse_script(child, "")
 
         return scripts
 
@@ -748,45 +924,90 @@ class DDRFile:
                     "name": ps.get("name"),
                 }
 
-                ra = ps.find("RecordAccessPrivileges")
-                if ra is not None:
-                    record_access = []
-                    for ta in ra.findall("TableAccess"):
-                        record_access.append({
-                            "table": ta.get("name", ""),
-                            "create": ta.get("create", ""),
-                            "delete": ta.get("delete", ""),
-                            "edit": ta.get("edit", ""),
-                            "view": ta.get("view", ""),
-                        })
-                    p["record_access"] = record_access
+                # The four tags this used to look for -- RecordAccessPrivileges,
+                # LayoutAccessPrivileges, ScriptAccessPrivileges and
+                # ExtendedPrivileges -- do not exist in FileMaker DDR output.
+                # The real children are Records / Layouts / Scripts / ValueLists,
+                # so every privilege set emitted as just {id, name}: no per-table
+                # grants, no field-level restrictions, and no row-level security
+                # predicates. Those predicates are the authorization model.
+                for attr in ("menu", "printing", "exporting", "idleDisconnect",
+                             "manageAccounts", "managedExtended", "allowModifyPassword",
+                             "overrideValidationWarning", "comment"):
+                    if ps.get(attr) is not None:
+                        p[attr] = ps.get(attr)
 
-                la = ps.find("LayoutAccessPrivileges")
-                if la is not None:
-                    layout_access = []
-                    for lac in la.findall("LayoutAccess"):
-                        layout_access.append({
-                            "layout": lac.get("name", ""),
-                            "access": lac.get("access", ""),
-                        })
-                    p["layout_access"] = layout_access
+                def _value(el, tag):
+                    child = el.find(tag) if el is not None else None
+                    return child.get("value", "") if child is not None else ""
 
-                sa = ps.find("ScriptAccessPrivileges")
-                if sa is not None:
-                    script_access = []
-                    for sac in sa.findall("ScriptAccess"):
-                        script_access.append({
-                            "script": sac.get("name", ""),
-                            "access": sac.get("access", ""),
-                        })
-                    p["script_access"] = script_access
+                records = ps.find("Records")
+                if records is not None:
+                    rec = {"value": records.get("value", "")}
+                    tables = []
+                    for bt in records.findall("TableList/BaseTable"):
+                        entry = {
+                            "table": bt.get("name", ""),
+                            "create": _value(bt, "Create"),
+                            "view": _value(bt, "View"),
+                            "edit": _value(bt, "Edit"),
+                            "delete": _value(bt, "Delete"),
+                            "field_access": _value(bt, "FieldAccess"),
+                        }
+                        # A "Limited" grant carries a calculation -- this is
+                        # row-level security, and it is the whole ballgame.
+                        for tag in ("View", "Edit", "Create", "Delete"):
+                            calc = get_calculation(bt.find(tag)) if bt.find(tag) is not None else None
+                            if calc:
+                                entry[f"{tag.lower()}_calculation"] = calc
+                        fields = [
+                            {"field": f.get("name", ""),
+                             "restriction": f.get("accessRestriction", "")}
+                            for f in bt.findall("FieldAccess/FieldList/Field")
+                        ]
+                        if fields:
+                            entry["fields"] = fields
+                        tables.append(entry)
+                    if tables:
+                        rec["tables"] = tables
+                    p["records"] = rec
 
-                ep = ps.find("ExtendedPrivileges")
-                if ep is not None:
-                    ext = []
-                    for e in ep.findall("ExtendedPrivilege"):
-                        ext.append(e.get("name", ""))
-                    p["extended_privileges"] = ext
+                layouts = ps.find("Layouts")
+                if layouts is not None:
+                    lay = {
+                        "value": layouts.get("value", ""),
+                        "allow_creation": layouts.get("allowCreation", ""),
+                    }
+                    items = [
+                        {"layout": la.get("name", ""),
+                         "access": la.get("value", ""),
+                         "data_access": _value(la, "DataAccess")}
+                        for la in layouts.findall("LayoutList/LayoutAccess")
+                    ]
+                    if items:
+                        lay["items"] = items
+                    p["layouts"] = lay
+
+                scripts_el = ps.find("Scripts")
+                if scripts_el is not None:
+                    scr = {
+                        "value": scripts_el.get("value", ""),
+                        "allow_creation": scripts_el.get("allowCreation", ""),
+                    }
+                    items = [
+                        {"script": sa.get("name", ""), "access": sa.get("value", "")}
+                        for sa in scripts_el.findall("ScriptList/ScriptAccess")
+                    ]
+                    if items:
+                        scr["items"] = items
+                    p["scripts"] = scr
+
+                value_lists = ps.find("ValueLists")
+                if value_lists is not None:
+                    p["value_lists"] = {
+                        "value": value_lists.get("value", ""),
+                        "allow_creation": value_lists.get("allowCreation", ""),
+                    }
 
                 self._inject_source(p)
                 privileges.append(p)
@@ -1066,28 +1287,60 @@ class DDRMerger:
             merged.extend(ddr.value_lists)
         return merged
 
+    # Access blocks are per-file: in a multi-file solution the UI file and the
+    # data file each define their own rules under the SAME privilege-set name.
+    _ACCESS_KEYS = ("records", "layouts", "scripts", "value_lists")
+
     def merge_security(self):
-        """Merge accounts and privilege sets. Dedup privilege sets by name."""
+        """Merge accounts and privilege sets.
+
+        FileMaker syncs privilege-set NAMES across the files of a solution, but
+        NOT their contents: the UI file typically carries a coarse grant
+        (Records value="CreateEditDelete") while the data file carries the real
+        model (value="Custom" with per-table grants, field restrictions and
+        row-level security calculations).
+
+        Deduping by name and keeping the first occurrence therefore discards the
+        authorization model outright -- the files sort UI-first. Dedup on
+        identity, but keep every file's access block under `access_by_file`.
+        """
         all_accounts = []
         for ddr in self.files:
             all_accounts.extend(ddr.accounts)
 
-        # Dedup privilege sets by name — FM syncs them across files
         priv_by_name = {}
         for ddr in self.files:
             for p in ddr.privileges:
                 name = p["name"]
+                access = {k: p[k] for k in self._ACCESS_KEYS if k in p}
+
                 if name not in priv_by_name:
-                    # Use first occurrence as base, track source files
-                    entry = dict(p)
+                    entry = {k: v for k, v in p.items() if k not in self._ACCESS_KEYS}
                     entry["source_files"] = [ddr.source_file]
-                    # Remove single source_file, replace with plural
                     entry.pop("source_file", None)
+                    entry["access_by_file"] = {}
                     priv_by_name[name] = entry
                 else:
-                    # Add this file to the source_files list
-                    if ddr.source_file not in priv_by_name[name]["source_files"]:
-                        priv_by_name[name]["source_files"].append(ddr.source_file)
+                    entry = priv_by_name[name]
+                    if ddr.source_file not in entry["source_files"]:
+                        entry["source_files"].append(ddr.source_file)
+
+                if access:
+                    priv_by_name[name]["access_by_file"][ddr.source_file] = access
+
+        # Surface the richest definition at the top level for convenience: the
+        # one that actually enumerates tables. Consumers wanting per-file detail
+        # read access_by_file.
+        for entry in priv_by_name.values():
+            best = None
+            for source_file, access in entry["access_by_file"].items():
+                tables = (access.get("records") or {}).get("tables")
+                if tables and (best is None or len(tables) > best[1]):
+                    best = (source_file, len(tables))
+            chosen = best[0] if best else next(iter(entry["access_by_file"]), None)
+            if chosen:
+                entry.update(entry["access_by_file"][chosen])
+                entry["access_source_file"] = chosen
 
         return all_accounts, list(priv_by_name.values())
 

@@ -51,12 +51,52 @@ A table with only globals and no schema fields is NOT a real database table.
 
 ## Calculation Text Extraction
 
-FileMaker DDR versions differ in how they store calculation/formula text. There are two patterns:
+> **This section previously documented a shape that does not exist, and every
+> tool written against it silently corrupted its output. Verified against
+> FileMaker 22 DDR exports: 36,051 `<Calculation>` elements, 0 with a `<Text>`
+> child.**
 
-- **`<Calculation><Text>...</Text></Calculation>`** — present in some DDR versions, but may be **empty** in v19+ exports.
-- **`<DisplayCalculation><Chunk>text</Chunk><Chunk>text</Chunk>...</DisplayCalculation>`** — reliable fallback. Concatenate all `<Chunk>` children's text to reconstruct the formula.
+Two elements carry formula text, and they are **not** two interchangeable versions:
 
-Always try `Calculation > Text` first, then fall back to `DisplayCalculation > Chunk`. This applies to: field calculations, auto-enter calculations, script step calculations, and custom functions.
+- **`<Calculation>`** holds the formula as **direct text**:
+  ```xml
+  <Calculation>not Investigation_boolean and not isAdmin_Private</Calculation>
+  ```
+  Read `calc.text`. Do **not** look for a `<Text>` child — measured 0/36,051.
+- **`<DisplayCalculation>`** is a *chunked rendering* of the same formula, for display:
+  ```xml
+  <DisplayCalculation>
+    <Chunk type="FunctionRef">Get</Chunk>
+    <Chunk type="NoRef"> ( </Chunk>
+    <Chunk type="FunctionRef">AccountName</Chunk>
+    <Chunk type="NoRef"> ) ≠ </Chunk>
+    <Chunk type="FieldRef"><Field table="Case_Notes" id="4" name="log_created_account"/></Chunk>
+  </DisplayCalculation>
+  ```
+
+Chunk `type` determines where the payload lives:
+
+| `type` | Payload | Notes |
+|---|---|---|
+| `NoRef` | `.text` | operators, punctuation, literals. Carries authored whitespace. |
+| `FunctionRef` | `.text` | function names |
+| `CustomFunctionRef` | `.text` | custom function names |
+| `FieldRef` | **nested `<Field table= name=/>`** | **`.text` is empty** |
+
+**The trap:** `"".join(c.text or "" for c in chunks)` looks correct and is
+catastrophic. It deletes every field operand while keeping operators and string
+literals, producing a syntactically plausible formula that is semantically
+wrong — `Get ( AccountName ) ≠` instead of
+`Get ( AccountName ) ≠ Case_Notes::log_created_account`. Nothing downstream can
+detect this, because the output is still well-formed. Worse: when a formula is a
+*single* FieldRef chunk it renders to the empty string, so the field appears to
+have **no formula at all**.
+
+**Extract `<Calculation>`'s direct text.** If you must walk chunks, resolve
+`FieldRef` children to `table::name` rather than dropping them. Applies to: field
+calculations, auto-enter calculations, script step calculations, custom
+functions, conditional formatting, hide conditions, and privilege-set row-level
+security predicates.
 
 ## Tables and Fields
 
@@ -202,7 +242,19 @@ Prefer `DDRInfo > Field` (structured). Fall back to `Name` text (format: `Table:
 ```
 
 ### Button actions
-Buttons live inside `<GroupButtonObj>` elements (not `<Object type="Button">`):
+
+Buttons come in **four** flavours. Handling only `GroupButtonObj` misses the
+majority of real bindings — measured on one solution: 872 of 1,536 distinct
+button actions lost (57%), and 112 layouts reporting no buttons while genuinely
+having them.
+
+| Element | Notes |
+|---|---|
+| `ButtonObj` | Plain button. **The most common carrier of real actions.** |
+| `GroupButtonObj` | Often a *container*: its `<Step>` may be nested a level deeper, not a direct child. |
+| `PopoverButtonObj` | Popover trigger; can hold several steps. |
+| `ButtonBarObj` | Segmented bar; multiple steps. |
+
 ```xml
 <Object type="GroupButton" ...>
   <GroupButtonObj numOfObjs="...">
@@ -215,39 +267,46 @@ Buttons live inside `<GroupButtonObj>` elements (not `<Object type="Button">`):
 </Object>
 ```
 
+Search **nested** `<Step>` elements (`el.iter("Step")`) across all four tags, not
+just direct children. Dedup on `(action, script)` — keying on script name alone
+collapses distinct scriptless buttons together.
+
 ### Conditional Formatting
 
 Layout objects can have conditional formatting rules that change visual appearance based on a formula:
+
+> **Corrected against real DDR output.** The shape below was previously
+> documented without the `<Item>` wrapper, with `Format` inside `Condition`, and
+> with a `type` attribute. All three are wrong, and `findall` is non-recursive —
+> so a parser written to the old shape extracted **exactly zero rules from every
+> file** while emitting a well-formed empty list.
 
 ```xml
 <Object type="Field" name="budget_total" ...>
   <FieldObj ...>...</FieldObj>
   <ConditionalFormatting>
-    <Condition type="Formula">
-      <Calculation>
-        <Text>Budget::total &gt; Budget::paid</Text>
-      </Calculation>
+    <Item id="0" flags="5">
+      <Condition op="0">
+        <Calculation>Budget::total &gt; Budget::paid</Calculation>
+        <DisplayCalculation>...</DisplayCalculation>
+      </Condition>
       <Format>
-        <FillColor value="#FF0000"/>
-        <TextColor value="#FFFFFF"/>
+        <Styles>
+          <LocalCSS>background-color: rgba(100%,0%,0%,1); -fm-strikethrough: true;</LocalCSS>
+        </Styles>
       </Format>
-    </Condition>
-    <Condition type="Formula">
-      <Calculation>
-        <Text>Budget::total = Budget::paid</Text>
-      </Calculation>
-      <Format>
-        <FillColor value="#00FF00"/>
-      </Format>
-    </Condition>
+    </Item>
   </ConditionalFormatting>
 </Object>
 ```
 
-- Multiple `<Condition>` elements per object (evaluated in order, first match wins)
-- `<Format>` children vary: `FillColor`, `TextColor`, `FontStyle` (Bold/Italic), etc.
-- Formula text uses the same calculation syntax as field calculations and scripts
-- Business logic is frequently embedded here: financial thresholds, status pipelines, urgency countdowns
+- Every `<Condition>` is wrapped in an **`<Item>`**. Iterate `ConditionalFormatting > Item > Condition`.
+- The attribute is **`op`**, not `type`.
+- **`<Format>` is a sibling of `<Condition>`**, both under `<Item>` — not a child of Condition.
+- Formatting is **CSS** at `Format > Styles > LocalCSS`, not discrete `FillColor` / `TextColor` elements.
+- `Item@flags` (observed `3`, `5`) encodes rule state.
+- Formula lives in `<Calculation>` — see "Calculation Text Extraction".
+- Business logic is frequently embedded here: financial thresholds, status pipelines, urgency countdowns.
 
 ### Hide Object When
 
@@ -284,7 +343,16 @@ Any layout object can have a visibility condition — a formula that hides the o
 
 ## Scripts
 
-Path: `File > ScriptCatalog > Group > Script` (groups can nest)
+Path: `File > ScriptCatalog > {Group | Script}` — groups can nest, **and scripts
+also appear at the root of `ScriptCatalog`, outside any group.**
+
+> **Do not treat `Group` as a mandatory path segment.** Descending only into
+> groups silently drops every ungrouped script. Measured across 13 real
+> solutions: **1,860 of 17,870 script definitions (10.4%) lost** — and the
+> ungrouped tier is exactly where developers put startup, login, routing and
+> cross-cutting trigger logic (`Open`, `Set User Information at Login`,
+> `Go To Layout By Account`, `Set is_Closed from ...`). The `LayoutCatalog`
+> has the same dual shape; handle both identically.
 
 ```xml
 <Group name="Sales" ...>
@@ -370,7 +438,58 @@ Attributes: `name`, `status` (Active/Inactive), `privilegeSet`, `emptyPassword`
 
 ### Privilege Sets
 Path: `File > PrivilegesCatalog > PrivilegeSet`
-Contains: `RecordAccessPrivileges > TableAccess` (CRUD per table), `LayoutAccessPrivileges`, `ScriptAccessPrivileges`, `ExtendedPrivileges`
+
+> **Corrected.** The four element names previously documented here —
+> `RecordAccessPrivileges`, `LayoutAccessPrivileges`, `ScriptAccessPrivileges`,
+> `ExtendedPrivileges` — **do not exist in FileMaker DDR output.** A parser
+> written to them emits every privilege set as bare `{id, name}` and drops the
+> authorization model entirely: 5,240 field-level rules and 18 row-level
+> security predicates lost in a single solution, with no error.
+
+Real children: **`Records`**, **`Layouts`**, **`Scripts`**, **`ValueLists`**.
+
+```xml
+<PrivilegeSet id="5" name="Manager" menu="All" printing="True" exporting="True"
+              idleDisconnect="True" manageAccounts="False" allowModifyPassword="True"
+              overrideValidationWarning="True" comment="">
+  <Records value="Custom">
+    <TableList>
+      <BaseTable id="129" name="Intakes" comment="">
+        <Create value="True"/>
+        <Delete value="False"/>
+        <View value="Limited">
+          <Calculation>not Investigation_boolean and not isAdmin_Private</Calculation>
+          <DisplayCalculation>...</DisplayCalculation>
+        </View>
+        <Edit value="Limited">...</Edit>
+        <FieldAccess value="Limited">
+          <FieldList>
+            <Field id="1" name="ID" accessRestriction="Modifiable"/>
+          </FieldList>
+        </FieldAccess>
+      </BaseTable>
+    </TableList>
+  </Records>
+  <Layouts value="Modifiable" allowCreation="True">
+    <LayoutList><LayoutAccess name="..." value="..."><DataAccess value="..."/></LayoutAccess></LayoutList>
+  </Layouts>
+  <Scripts value="ExecutableOnly" allowCreation="False"/>
+  <ValueLists value="Modifiable" allowCreation="True"/>
+</PrivilegeSet>
+```
+
+Key points:
+
+- `Records@value` is a coarse grant (`ViewOnly`, `CreateEdit`, `CreateEditDelete`,
+  `Custom`). Only **`Custom`** carries a `TableList`.
+- **`value="Limited"` on View/Edit/Create/Delete means a `<Calculation>` child holds a
+  row-level security predicate.** This *is* the authorization model — extract it.
+- `FieldAccess > FieldList > Field@accessRestriction` gives field-level rules.
+- **Multi-file solutions:** privilege-set *names* are synced across files, but their
+  *contents* are not. The UI file typically holds a coarse grant while the data file
+  holds the `Custom` model. Deduping by name and keeping the first occurrence
+  discards the real rules — files usually sort UI-first. Merge per-file, or prefer
+  the definition that enumerates tables.
 
 ## Custom Functions
 
