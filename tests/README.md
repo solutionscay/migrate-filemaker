@@ -1,13 +1,16 @@
-# Parser regression tests
+# Regression tests
 
 ```
-python3 -m unittest discover -s tests -v      # or: python3 tests/test_parse_ddr.py
+python3 -m unittest discover -s tests -v
 ```
 
 Stdlib only. `parse_ddr.py` has no dependencies and must keep none.
 
 - `fixtures/mini_ddr.xml` — a hand-authored FMPReport, UTF-16 LE, ~370 lines.
 - `test_parse_ddr.py` — runs the real parser over it and asserts the output exactly.
+- `test_skill_contract.py` — guards provenance, stable explorer identities, root
+  script filenames, exact-set coverage, supported skill metadata, and repaired
+  high-risk guidance/templates.
 
 ---
 
@@ -92,9 +95,9 @@ would count them and report 5 instead of 2).
 
 ---
 
-## Two things to know before you edit this
+## One thing to know before you edit the parser fixture
 
-**1. One shape in the fixture is not observed in gold.** The `stale_banner`
+One shape in the fixture is not observed in gold. The `stale_banner`
 hide condition has an empty `<Calculation />` next to a populated
 `<DisplayCalculation>`. In real gold, **100% of `DisplayCalculation` parents also
 carry `<Calculation>` direct text** (measured: every one, across both raw files),
@@ -105,27 +108,3 @@ operand deletion lived. It is exercised here deliberately. Everything *inside*
 that element — the chunk types, the nested `<Field table= id= name=/>`, the
 indentation — is verbatim gold. Only the empty `<Calculation />` sibling is
 constructed.
-
-**2. One assertion pins a defect on purpose.** `_MANAGER_ACCESS["layouts"]` has
-no `items` key, and the test asserts that. This is **not** the parser being
-right. The parser reads `Layouts/LayoutList/LayoutAccess`, but FileMaker emits:
-
-```xml
-<Layouts value="Custom" allowCreation="False">
-  <LayoutList>
-    <Layout id="1" name="Intakes">
-      <LayoutAccess value="NoAccess"/>
-      <DataAccess value="NoAccess"/>
-    </Layout>
-```
-
-`LayoutAccess` is a **child of `Layout`** carrying `value=`, not a sibling
-carrying `name=`. So `findall("LayoutList/LayoutAccess")` returns `[]` and every
-per-layout grant is dropped — 236 of them in gold's `RCDA_Schema`. This is the
-D4 fix's residual: the audit flagged the D4 patch as "written but not executed",
-and this is the part that did not survive contact with the XML.
-
-The fixture encodes the **real** shape. The assertion encodes **current
-behavior**, so the defect is visible in the test rather than silent in the
-output. When the parser is fixed, this assertion is *supposed* to fail — update
-it to the recovered `items`, don't delete it.

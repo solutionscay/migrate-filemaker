@@ -1,0 +1,4 @@
+interface:
+  display_name: "FileMaker Migration Planner"
+  short_description: "Recover and plan verified FileMaker migrations"
+  default_prompt: "Use $migrate-filemaker to analyze this FileMaker DDR and produce evidence-backed migration artifacts."

@@ -1,132 +1,61 @@
 # migrate-filemaker
 
-A Claude Code skill that guides a full migration from FileMaker Pro to an open-source stack. Point it at a FileMaker Database Design Report (DDR) XML export and it will parse the DDR, discover your requirements through conversation, recommend a tech stack, and generate a detailed rebuild plan complete with SQL schema, API design, UI spec, and business logic mapping.
+An evidence-first coding-agent skill for recovering FileMaker behavior from Database Design Report XML and planning a verifiable rebuild.
+
+It includes a standard-library Python parser, provenance and explorer-coverage gates, FileMaker semantic references, workflow guides, and migration artifact templates.
 
 ## Requirements
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (CLI, desktop app, or IDE extension)
-- Python 3.6+
-- A FileMaker DDR XML export (generated from FileMaker Pro via File > Save a Copy as XML)
+- A coding agent that supports project/personal skills
+- Python 3
+- The complete FileMaker DDR XML export set, including `Summary.xml` when available
 
-## Installation
+Raw DDR XML can contain sensitive logic or credential literals. Keep it out of version control and do not paste secrets into generated documents.
 
-Clone or copy this repository into your Claude Code skills directory:
+## Install
+
+Clone or vendor this directory into the skill location supported by your coding agent. Invoke it as `$migrate-filemaker` where supported, or ask the agent to load `SKILL.md` from this directory.
+
+## Process
+
+1. **Prove inputs**: run the parser regression suite, parse all DDR report files, and bind raw XML, parser, topology, and JSON specs with `_provenance.json`.
+2. **Inventory and explore**: analyze every populated source catalog. Explorer state uses stable source identities and exact-set reconciliation, not array positions or directory existence.
+3. **Discover decisions**: ask for business, identity, UI, data, integration, and operational context that the artifacts cannot establish.
+4. **Design contracts**: produce evidence-linked schema, server/API, UI, business-logic, authorization, migration, and cutover artifacts.
+5. **Audit completion**: trace high-risk conclusions back to raw XML/screenshots, run negative authorization tests, and validate migrated values beyond row counts.
+
+The workflow does not guarantee that parsed layout JSON is a complete UI specification, that every FileMaker relationship is a foreign key, or that a generated document is correct because it is well formed. Missing semantics remain explicit blockers or product decisions.
+
+## Configure paths
+
+The skill does not assume `ddr/specs` or `migration/`. Set paths once for the repository:
 
 ```bash
-# Personal skills directory (available in all projects)
-git clone https://github.com/solutionscay/migrate-filemaker.git ~/.claude/skills/migrate-filemaker
-
-# Or project-local (available only in that project)
-git clone https://github.com/solutionscay/migrate-filemaker.git .claude/skills/migrate-filemaker
+SKILL_DIR="/path/to/migrate-filemaker"
+RAW_DIR="/path/to/implementation/raw"
+SPECS_DIR="/path/to/implementation/specs"
+ANALYSIS_DIR="/path/to/implementation/analysis"
+CORE_DIR="/path/to/canonical/core"
 ```
 
-## Usage
+See `SKILL.md` for the complete process.
 
-In Claude Code, invoke the skill with the path to your DDR export:
+## Verify this package
 
-```
-/migrate-filemaker path/to/your/DDR.xml
-```
-
-You can also pass a directory containing multiple DDR XML files (for multi-file FileMaker solutions):
-
-```
-/migrate-filemaker path/to/ddr-exports/
+```bash
+python3 -m unittest discover -s tests
 ```
 
-The skill runs interactively — it will ask you questions about your goals, users, constraints, and preferences before generating the migration plan.
+The suite is standard-library-only. It guards parser semantic fixtures, provenance invalidation, stable explorer identities, root-script coverage, exact-set classification checks, and high-risk guidance contracts.
 
-## What It Does
+## Resources
 
-The migration runs in four phases, each producing checkpoint files so work can be paused and resumed:
-
-### Phase 1: Parse & Understand
-
-Runs the built-in DDR parser to extract structured JSON specs from the XML, then analyzes the solution to produce an application summary covering:
-
-- Data model (tables, fields, relationships)
-- Feature map (scripts grouped by domain)
-- UI inventory (layouts, portals, buttons)
-- Security model (privilege sets, accounts)
-- Red flags (container fields, globals-heavy state, complex calculations)
-- Specialized business logic detection
-
-### Phase 2: Discovery
-
-An interactive conversation (not a survey dump) that explores:
-
-- Migration goals and scope
-- Users and scale requirements
-- UI style preferences and design references
-- Technical preferences and team skills
-- Timeline and budget constraints
-- Data migration and integration needs
-- Specialized business logic details
-
-### Phase 3: Recommend
-
-Produces a tech stack recommendation covering database, backend, frontend, auth, deployment, and architecture pattern — with primary and alternative choices, scored against your specific needs.
-
-### Phase 4: Plan
-
-Generates the full set of migration artifacts:
-
-| File | Contents |
-|------|----------|
-| `03_migration_plan.md` | Phased build plan with effort estimates and risk register |
-| `04_database_schema.sql` | Complete database DDL |
-| `05_api_design.md` | RESTful + custom endpoints grouped by domain |
-| `06_ui_spec.md` | Page inventory, component mapping, form specs |
-| `07_business_logic.md` | Script categorization and logic translation |
-| `08_auth_roles.md` | Role definitions and access control model |
-
-## Deep Exploration (Optional)
-
-For complex solutions (50+ scripts, heavy conditional formatting, many calculated fields), the skill includes specialized explorers that can be run between Phase 1 and Phase 2:
-
-- **Script Explorer** — classifies every script by type, logic tier, and migration target
-- **Conditional Formatting Explorer** — extracts business rules encoded in formatting formulas
-- **Hide-Object-When Explorer** — uncovers authorization models and state machines hidden in visibility rules
-- **Calculated Fields Explorer** — catalogs domain-specific calculations
-- **Custom Functions Explorer** — documents the shared logic layer
-
-## Output Structure
-
-All generated files are written to a `migration/` directory in your working directory:
-
-```
-migration/
-  00_app_summary.md
-  01_discovery_answers.md
-  02_recommendations.md
-  03_migration_plan.md
-  04_database_schema.sql
-  05_api_design.md
-  06_ui_spec.md
-  07_business_logic.md
-  08_auth_roles.md
-```
-
-Explorer outputs (if run) go into their own subdirectories:
-
-```
-migration/fm-scripts-explorer/
-migration/fm-cf-explorer/
-migration/fm-hide-explorer/
-migration/fm-calc-explorer/
-migration/fm-func-explorer/
-```
-
-## How to Generate a DDR Export
-
-In FileMaker Pro:
-
-1. Open your solution file
-2. Go to **File > Save a Copy as XML**
-3. Choose **Database Design Report** as the format
-4. Save to a directory
-
-For multi-file solutions, export each file's DDR into the same directory — the parser auto-detects and merges them.
+- `scripts/parse_ddr.py`: DDR parser with extraction self-check and credential-literal redaction
+- `scripts/provenance.py`: raw/parser/spec/topology provenance create/verify gate
+- `scripts/catalog_contract.py`: stable explorer source snapshots and exact-set coverage verifier
+- `reference/`: FileMaker/XML/translation methodology
+- `workflows/`: script, calculation, function, formatting, hide, schema, and UI workflows
+- `templates/`: evidence-bounded migration artifacts
 
 ## License
 

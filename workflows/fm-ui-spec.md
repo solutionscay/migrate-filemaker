@@ -1,192 +1,94 @@
-# UI Spec Builder
+# FileMaker UI Evidence and Specification Workflow
 
-Internal workflow for generating a complete frontend UI specification from a FileMaker DDR export and migration discovery answers. Writes `migration/06_ui_spec.md`.
+The current `04_layouts.json` supports a layout inventory, not an implementation-complete screen specification. Produce only the level of detail supported by raw layout evidence, screenshots, and stakeholder confirmation.
 
-You are generating a complete frontend UI specification for a FileMaker migration. Your job is to map every FileMaker layout to a modern page, translate FM UI elements to modern component equivalents, incorporate the user's design direction from discovery, and surface the business logic embedded in conditional visibility and formatting rules.
+## Inputs
 
-**This spec is what a frontend developer builds from.** It must be complete enough that a developer can implement every screen without referencing any other document. Do not skim the form specs or component mapping — the detail here is the value.
+- verified `04_layouts.json`;
+- `05_scripts.json` and Script Explorer reports;
+- `06_value_lists.json`;
+- Conditional Formatting and Hide-Object Explorer reports with attribution status;
+- raw DDR layout XML for object identity, bounds, controls, tabs, triggers, labels, and style data;
+- current screenshots or recordings for visual hierarchy and interaction behavior;
+- discovery decisions for target devices, accessibility, and workflows.
 
----
+If raw XML/screenshots are unavailable, use [../templates/06_ui_spec.md](../templates/06_ui_spec.md) in `inventory-only` mode and list missing evidence. Do not fill absent properties with conventional guesses.
 
-## Step 1 — Check Prerequisites
+## Step 1: Record the extraction boundary
 
-Verify required inputs exist:
+Before describing screens, inventory which properties are present in parsed JSON and which require another source. Check rather than assume:
 
-```bash
-ls migration/01_discovery_answers.md migration/00_app_summary.md ddr/specs/04_layouts.json 2>/dev/null
+| Property | Parsed JSON | Required fallback |
+|---|---|---|
+| Layout id/name/table occurrence/width | Usually present | Raw XML for confirmation |
+| Field/portal/button inventories | Partial | Raw XML and screenshot |
+| Object bounds/order | Not in current contract | Raw XML |
+| Static labels/text | Not in current contract | Raw XML/screenshot |
+| Input control and value-list binding | Not in current contract | Raw XML |
+| Tab/panel membership | Not in current contract | Raw XML/screenshot |
+| Layout/object triggers | Not in current contract | Raw XML/script trace |
+| Stable object key for hide/CF attribution | Not in current contract | Raw XML extraction |
+| Responsive intent/accessibility | Not represented by DDR | Product decision/testing |
+
+State observed counts and `not measured` where no census was run.
+
+## Step 2: Build a stable raw object inventory
+
+For every implementation-critical layout, extract or manually record:
+
+```text
+source_file,layout_id,layout_name,object_key,object_type,parent/container_path,bounds,label,field_or_portal,control_type,value_list,button_action,trigger,hide_rule_ids,cf_rule_ids
 ```
 
-Check for optional inputs:
+Use raw XML ids/object keys when emitted. If no stable key exists, combine source file, layout id, object type, bounds, and container path, then label the identity `derived` and verify it against a screenshot. Never join hide/CF rules to an object by array position.
 
-```bash
-ls migration/fm-hide-explorer/reports/summary.md 2>/dev/null && echo "Hide-object explorer: available" || echo "Hide-object explorer: not run"
-ls migration/fm-cf-explorer/reports/summary.md 2>/dev/null && echo "Conditional formatting explorer: available" || echo "Conditional formatting explorer: not run"
-ls migration/fm-scripts-explorer/reports/summary.md 2>/dev/null && echo "Script explorer: available" || echo "Script explorer: not run"
-```
+Record unnamed/unattributed hide and CF rules separately until this mapping is proven.
 
-If `migration/01_discovery_answers.md` is missing, stop:
-> "Discovery answers not found. Complete Phase 2 first — the UI spec depends on the user's design direction from discovery."
+## Step 3: Inventory screens and workflows
 
-If `ddr/specs/04_layouts.json` is missing, stop:
-> "Layout specs not found. Run the DDR parser first with `/migrate-filemaker <path-to-ddr>`."
+For each layout:
 
-Note which optional inputs are available — Hide-Object-When and Conditional Formatting Explorer reports significantly enrich conditional visibility, auth, and visual-state sections.
+- distinguish operational screens from print/report/utility layouts;
+- resolve the layout's table occurrence to a base table;
+- trace buttons and triggers to scripts and classify the invoked effects;
+- record found-set/list/detail/portal behavior;
+- record current labels, controls, value lists, tabs, dialogs, and validation feedback from raw/screenshot evidence;
+- record role/state visibility as UI behavior and cross-reference server authorization requirements;
+- record unresolved objects and missing screenshots.
 
----
+A trigger that changes durable state invokes a server-owned operation; do not specify it as client-only logic.
 
-## Step 2 — Profile the Layouts
+## Step 4: Design the target experience
 
-Extract a layout inventory:
+Separate source behavior from target product decisions. For each target page or flow, specify:
 
-```bash
-python3 -c "
-import json
-from collections import Counter
+- route and use case;
+- authorized operations and data fields;
+- data loading, pagination, filtering, and sort behavior;
+- forms, exact validation owner, value sources, error and empty states;
+- persistent business operations called by UI events;
+- component visibility as defense in depth;
+- responsive behavior for named breakpoints/devices;
+- keyboard, focus, labels, contrast, screen-reader, and destructive-action requirements;
+- source layout/object/script traceability.
 
-with open('ddr/specs/04_layouts.json') as f:
-    layouts = json.load(f)
+Do not promise pixel equivalence unless screenshots/bounds/styles were captured and the user requested it.
 
-print(f'Total layouts: {len(layouts)}')
+## Step 5: Completeness gate
 
-by_table = Counter(l.get('table', 'unknown') for l in layouts)
-print('Layouts by table:')
-for table, count in by_table.most_common():
-    print(f'  {table}: {count}')
+For every target screen, use one status:
 
-print('Layouts with portals/tabs:')
-for l in layouts:
-    portals = l.get('portals', [])
-    tabs = l.get('tab_controls', [])
-    buttons = l.get('buttons', [])
-    if portals or tabs:
-        print(f\"  {l['name']}: {len(portals)} portals, {len(tabs)} tab controls, {len(buttons)} buttons\")
-"
-```
+- `implementation-ready`: labels, geometry/hierarchy, controls, actions, triggers, data, authorization, and states are evidenced or explicitly decided;
+- `behavior-ready`: workflow and operations are specified but visual/layout details remain a design task;
+- `inventory-only`: parsed catalogs identify the layout and objects but cannot support implementation;
+- `blocked`: a critical behavior or security rule is unresolved.
 
-Then read:
-- `migration/01_discovery_answers.md` — focus on Group 2 (access patterns) and Group 3 (UI style, screenshots, reference apps)
-- `migration/00_app_summary.md` — feature map, script navigation patterns, UI summary
-- `migration/fm-hide-explorer/reports/` — if available: `summary.md`, `auth-model.md`, `state-rules.md`
-- `migration/fm-cf-explorer/reports/` — if available: `summary.md`, `business-logic-catalog.md`
-- `migration/fm-scripts-explorer/reports/summary.md` — if available: navigation patterns, UI dispatchers
+An overall UI spec may be called implementation-ready only when every in-scope screen is implementation-ready and all unattributed hide/CF rules have a disposition.
 
----
+## Verification
 
-## Step 3 — Generate the UI Spec
-
-Use [templates/06_ui_spec.md](../templates/06_ui_spec.md) as the structural scaffold. Consult [reference/filemaker-concepts.md](../reference/filemaker-concepts.md) for FM-to-modern UI element mapping.
-
-### 3A. Design Direction
-
-Summarize:
-- **Target style** from the user's Discovery Group 3 answer (clean/minimal, data-dense, match FM look, or custom)
-- **Current FM app observations** from any screenshots the user provided — layout density, color usage, navigation patterns, what works and what the user wants changed
-- **Reference apps** the user cited with a note on what to emulate from each
-- **Design tokens** derived from the style direction: border radius, density, color palette, typography
-
-### 3B. Navigation Structure
-
-Derive the navigation structure from:
-- FM layouts used as navigation hubs (home screens, menu layouts)
-- Groups of "Go To Layout" scripts — these reveal the app's information architecture
-- The feature map domains from Phase 1
-
-Draw the proposed nav structure as an ASCII tree. Note explicitly how FM's button-driven navigation maps to a sidebar or top-nav with standard route links.
-
-### 3C. Page Inventory
-
-Map every user-facing FM layout to a modern route and component:
-
-| FM Layout | Route | Component | Type | Description |
-|---|---|---|---|---|
-
-Types: `List` / `Form` / `Dashboard` / `Report` / `Modal` / `Settings`
-
-**Pages to drop:** FM layouts with no modern equivalent (dedicated print layouts, developer tools, pure navigation hubs that become sidebar links). Explain the reason for each.
-
-### 3D. Component Mapping
-
-Map FM UI elements to modern equivalents. Start from the standard mapping in `reference/filemaker-concepts.md`, then add application-specific behavior notes:
-
-| FM Element | Modern Equivalent | Behavior Notes |
-|---|---|---|
-
-For complex components, provide full detail:
-
-**Portals** — for each portal on a significant layout:
-- Source table and fields
-- Column list with data types
-- Which columns are editable inline
-- Inline calculations (e.g., line total = qty × unit_price)
-- Add/remove row behavior, sort behavior
-- Proposed component: editable data table, read-only sub-table, or collapsible list
-
-**Tab Controls** — for each multi-tab layout:
-- Tab names and content summary
-- Any conditional tab visibility (if Hide-Object-When Explorer found hide rules on tabs, reference them here)
-
-**Pop-overs and Slide Controls** — map to popover/dropdown, modal dialog, or multi-step wizard as appropriate
-
-### 3E. Conditional Visibility
-
-**If Hide-Object-When Explorer was run**, read `migration/fm-hide-explorer/reports/summary.md` and `migration/fm-hide-explorer/reports/state-rules.md`. Map each category to its modern implementation pattern:
-
-| FM Hide Category | Modern Pattern | Implementation |
-|---|---|---|
-| Role check (`$$USER_privgroup`) | Route guard + `v-if` | Auth middleware checks `user.role` |
-| Permission flag (`$$SENSITIVEDATA_*`) | Permission store + conditional | `v-if="can('view:sensitive')"` |
-| Record-level flag | Component prop | `:visible="!record.isConfidential \|\| canViewConfidential"` |
-| Session state (`data01 = ""`) | Reactive store | Store getter + `v-if` |
-| Workflow state (`$$status = "sent"`) | State machine | XState enum or store enum |
-
-For each named object with a hide rule, note which component receives a conditional prop and what condition drives it.
-
-**If Hide-Object-When Explorer was NOT run**, flag the layouts with the most buttons and portals from the profile above as the highest-risk screens for hidden conditional logic. Recommend running the internal [fm-hide-explorer workflow](fm-hide-explorer.md) before implementation if the app has more than ~50 layouts.
-
-### 3F. Conditional Formatting
-
-**If Conditional Formatting Explorer was run**, read `migration/fm-cf-explorer/reports/summary.md` and `migration/fm-cf-explorer/reports/business-logic-catalog.md`. Map business-logic formatting rules to CSS class bindings or computed styles:
-
-| FM Formula | Visual Effect | Modern Implementation |
-|---|---|---|
-| [formula] | [e.g., red fill when overdue] | `:class="{ 'text-red-600': isOverdue }"` |
-
-Exclude cosmetic/noise rules (alternating row colors, alphabetical highlights) — implement those as standard table styling.
-
-### 3G. Form Specs
-
-For every data-entry layout, produce a complete field-by-field table. Do not skip fields.
-
-**[Form Name] — [Route] — [Component]**
-
-| Field Label | FM Field | Input Type | Validation | Conditional | Notes |
-|---|---|---|---|---|---|
-
-Input types: `text` / `email` / `number` / `date` / `time` / `select` / `multi-select` / `checkbox` / `radio` / `textarea` / `readonly` / `file-upload`
-
-Validation: `required` / `email` / `min:N` / `max:N` / `pattern:regex` / `[custom]`
-
-Conditional: "Show only if [condition]" — cross-reference Hide-Object-When Explorer rules where applicable.
-
-Notes: calculated fields (readonly, value derived), value list sources, currency formatting, placeholder text.
-
-### 3H. Responsive Requirements
-
-Based on Discovery Group 2 (access patterns, mobile/offline needs):
-
-| Device | Required | Priority | Notes |
-|---|---|---|---|
-| Desktop (1280px+) | [Yes/No] | [Primary/Secondary/Tertiary] | [Notes] |
-| Tablet (768–1279px) | [Yes/No] | [...] | [...] |
-| Mobile (<768px) | [Yes/No] | [...] | [...] |
-
-State the responsive strategy (desktop-first vs. mobile-first). Note any mobile-specific requirements from discovery (large touch targets, offline capability, field use context).
-
----
-
-## Step 4 — Write the File
-
-Write the complete spec to `migration/06_ui_spec.md`.
-
-After writing:
-> "UI spec written to `migration/06_ui_spec.md`. [N] pages documented, [N] portals detailed, [N] form specs. [If Hide-Object-When Explorer was not run and the app has >50 layouts:] Consider running the internal hide-object explorer workflow before implementation — hide-object-when rules frequently encode the authorization model and will be needed to complete the conditional visibility section."
+- Compare object totals and types to raw XML per source file/layout.
+- Walk every critical workflow against the current app or a recording.
+- Test all roles and negative authorization paths through the server, not only hidden controls.
+- Verify value-list bindings, tab membership, trigger actions, print behavior, and destructive confirmations.
+- Record screenshot/raw XML references without copying sensitive data.

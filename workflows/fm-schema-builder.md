@@ -1,270 +1,136 @@
-# Schema Builder
+# FileMaker Schema Builder
 
-Internal workflow for generating a production-ready SQL DDL schema from a FileMaker DDR spec export. Reads `ddr/specs/` tables, relationships, and value lists, then confirms key schema decisions before writing `migration/04_database_schema.sql`.
+Build a reversible target schema from source keys and relationship predicates. Do not invent `id` columns or foreign keys before the source key model is proven.
 
-You are generating a production-ready database schema from a FileMaker DDR export. Your job is to read the extracted specs, understand the data model, present key decisions to the user for confirmation, and then write a clean, well-commented SQL DDL file.
+Read [../reference/schema-translation-guide.md](../reference/schema-translation-guide.md) and [../reference/filemaker-concepts.md](../reference/filemaker-concepts.md) first.
 
-**This is careful translation work.** The schema you produce is the foundation everything else is built on. Silent assumptions about naming, normalization, types, or dropped fields create debt that's hard to unwind later. Always present before you write.
+## Required inputs
 
----
+- `$SPECS_DIR/_provenance.json` (must verify)
+- `01_tables.json`
+- `02_table_occurrences.json`
+- `03_relationships.json`
+- `05_scripts.json` for finds, sorts, writes, and found-set behavior
+- `06_value_lists.json`
+- raw validation/auto-enter metadata or a manual schema export when the parsed field record lacks it
+- source data profiles for candidate-key uniqueness, nulls, duplicates, orphans, ranges, and encodings
+- discovery decisions for timezone, containers, retention, and identifiers
 
-## Step 1 — Check Prerequisites
+Run provenance verification before analysis. If source data is unavailable, produce a schema decision register with unresolved keys; do not emit executable foreign keys on guesses.
 
-Verify required inputs:
+## Step 1: Inventory observed tokens
 
-```bash
-ls ddr/specs/01_tables.json ddr/specs/03_relationships.json ddr/specs/06_value_lists.json 2>/dev/null
+Read JSON structurally and print the distinct values of:
+
+- field `data_type` and `field_type`;
+- relationship predicate `operator`;
+- validation keys actually present;
+- table-occurrence resolution status.
+
+Fail on unknown enum values. The current parser contract uses:
+
+- `data_type == "Binary"` for FileMaker container data;
+- `data_type == "TimeStamp"` for timestamps;
+- relationship operators such as `Equal`, `NotEqual`, `GreaterThan`, `LessThan`, and `CartesianProduct`.
+
+Do not test `field_type == "Container"` or `operator == "="`; those literals do not describe the emitted JSON contract.
+
+## Step 2: Build the table-occurrence map
+
+Resolve every relationship side through `02_table_occurrences.json` using source-file context, occurrence id/name, `base_table`, `base_table_id`, and `resolved_source_file`.
+
+For every predicate, retain:
+
+```text
+relationship_id,source_file,left_to,left_base,left_field,operator,right_to,right_base,right_field,predicate_position
 ```
 
-```bash
-ls migration/02_recommendations.md 2>/dev/null
+Preserve all predicates in a compound relationship and preserve non-equality/cartesian semantics. Do not turn every relationship into a foreign key.
+
+Stop executable DDL generation when a referenced occurrence/base table or field cannot be resolved. Record the unresolved edge and required evidence.
+
+## Step 3: Classify keys from evidence
+
+For each base table:
+
+1. Inventory authored identifiers, auto-enter serial/UUID/calculation behavior, unique/not-empty settings, and relationship use.
+2. Profile actual records for nulls and duplicates. A field named `ID`, a serial auto-enter option, or use in a relationship is not proof of uniqueness.
+3. Identify composite candidate keys where relationships use multiple predicates.
+4. Decide which source identifiers remain public/business keys.
+5. Add a surrogate target key only when explicitly chosen. Record source-to-target mapping, backfill, uniqueness, cutover, and rollback behavior.
+6. Never add a second `id` column that collides case-insensitively with an existing authored field.
+
+A foreign key may reference only an evidenced primary/unique key with compatible types. When a FileMaker relationship expresses filtering rather than identity, model it as a query/domain rule instead.
+
+## Step 4: Map fields without strengthening semantics silently
+
+Record for every field:
+
+```text
+source_file,table_id,field_id,source_name,source_category,source_data_type,target_name,target_type,null_policy,default_policy,validation_policy,decision,evidence
 ```
 
-If `ddr/specs/` is missing, stop:
-> "ddr/specs/ not found. Run the DDR parser first with `/migrate-filemaker <path-to-ddr>`."
+- Preserve regular, calculated, summary, and global categories.
+- Handle `Binary` fields through a documented object-storage/blob decision; do not silently replace bytes with a URL without a file-migration plan.
+- Decide source timezone and DST ambiguity policy before converting `TimeStamp` values to timezone-aware instants.
+- Treat FileMaker validation timing, validate-if-modified behavior, user override, and custom messages separately from database constraints.
+- Add `NOT NULL`, `UNIQUE`, range, enum, or length constraints only after profiling and an explicit decision that the target should enforce stricter invariant semantics.
+- Port calculated fields to generated columns only when the target database permits the expression and dependencies; otherwise choose query/application/trigger/materialized behavior explicitly.
+- Analyze globals as per-session state by default; promote to shared configuration only when use and initialization prove that intent.
+- Normalize repeating fields with an order-preserving child model only after determining every repetition's meaning and script/layout dependencies.
 
-If `migration/02_recommendations.md` is missing, ask the user to confirm the target database (PostgreSQL, MySQL, or SQLite) before proceeding.
+## Step 5: Design referential behavior
 
----
+For each proven foreign key, record:
 
-## Step 2 — Profile the Data Model
+- source relationship and all predicates;
+- target unique key evidence;
+- nullability and orphan profile;
+- FileMaker create/delete-related-record behavior;
+- proposed `ON UPDATE`/`ON DELETE` action;
+- migration ordering and rejected-row treatment.
 
-Extract a working profile of tables and relationships:
+Do not default to `CASCADE`. FileMaker graph relationships do not by themselves establish ownership or delete semantics.
 
-```bash
-python3 -c "
-import json
-from collections import Counter
+## Step 6: Design indexes from workloads
 
-with open('ddr/specs/01_tables.json') as f:
-    tables = json.load(f)
+Create indexes for proven constraints and measured access paths:
 
-with open('ddr/specs/03_relationships.json') as f:
-    rels = json.load(f)
+- primary/unique constraints;
+- foreign-key checks and common joins;
+- high-value finds, sorts, reports, and authorization predicates;
+- partial/expression/full-text indexes when the target workload supports them.
 
-with open('ddr/specs/06_value_lists.json') as f:
-    vlists = json.load(f)
+Do not index every field named in a script. Record the query pattern and expected selectivity; validate with target query plans after data load.
 
-real_tables = [t for t in tables if t.get('fields')]
-globals_only = [t for t in tables if not t.get('fields') and t.get('globals')]
+## Decision gate before SQL
 
-repeating = []
-containers = []
-for t in real_tables:
-    for f in t.get('fields', []):
-        if f.get('repetitions', 1) > 1:
-            repeating.append(f\"{t['name']}.{f['name']} ({f['repetitions']} reps)\")
-        if f.get('field_type') == 'Container':
-            containers.append(f\"{t['name']}.{f['name']}\")
+Present a table of all unresolved or product-changing decisions:
 
-print(f'Real tables: {len(real_tables)}')
-for t in real_tables:
-    print(f\"  {t['name']}: {len(t.get('fields', []))} schema fields, {len(t.get('calculated', []))} calculated, {len(t.get('globals', []))} globals\")
-print(f'Globals-only tables: {len(globals_only)}')
-for t in globals_only:
-    print(f\"  {t['name']}: {len(t.get('globals', []))} globals\")
-print(f'Relationships: {len(rels)}')
-print(f'Value lists: {len(vlists)}')
-print(f'Repeating fields: {len(repeating)}')
-for r in repeating: print(f'  {r}')
-print(f'Container fields: {len(containers)}')
-for c in containers: print(f'  {c}')
-"
-```
+- source and target keys;
+- compound/non-equality relationships;
+- stricter constraints;
+- calculated/summary fields;
+- globals;
+- containers;
+- timestamp timezone/DST policy;
+- repeating fields;
+- delete/update behavior;
+- naming collisions and reserved words.
 
-Read `migration/02_recommendations.md` to confirm the target database and any architecture decisions that affect the schema.
+Obtain user/stakeholder confirmation for product decisions. Resolve factual questions from source artifacts rather than asking users to guess.
 
-Also read `migration/01_discovery_answers.md` if it exists — it may contain user guidance on globals classification or naming preferences from Discovery.
+## Generate and verify DDL
 
----
+Use [../templates/04_database_schema.sql](../templates/04_database_schema.sql). Include a traceability comment for each table, key, relationship-derived constraint, and intentional deviation.
 
-## Step 3 — Present Key Decisions and Wait for Confirmation
+Verification must include:
 
-Before writing a single line of SQL, present the following to the user and wait for their response:
+1. Parse/apply the DDL in a disposable instance of the selected database.
+2. Confirm every source field has a disposition and no target column name collides.
+3. Confirm every relationship predicate has a disposition: foreign key, query rule, domain rule, cartesian UI relation, or unresolved.
+4. Load representative profiled data and check constraint rejects explicitly.
+5. Test timezone boundaries, containers, composite keys, orphans, and duplicate legacy identifiers.
+6. Compare business totals and stable-value hashes, not only table/row counts.
 
-> "I'm ready to generate the database schema. Here's my plan — please confirm or redirect before I write the file.
->
-> **Target database:** [PostgreSQL / MySQL / SQLite]
->
-> **Tables to create ([N] total):**
-> [List each real table with field count]
->
-> **Tables to skip (globals-only):**
-> [For each, propose a disposition:]
-> - [TableName] — [N] globals → [proposed: app_settings rows / frontend session state / env variables]
->
-> **Primary key strategy:** Serial integer (`id SERIAL PRIMARY KEY`). Say so if you need UUIDs — valid reasons: syncing across systems, external references, distributed writes.
->
-> **Naming:** FM table names → lowercase `snake_case` plural. FM column names → lowercase `snake_case`. Prefixes like `tbl_`, `fk_`, `z_`, `_pk_` are stripped.
->
-> **Repeating fields ([N] found):**
-> [For each: proposed normalization as a child table, or separate columns if reps are few and semantically distinct]
->
-> **Container fields ([N] found):**
-> [List] → stored as `TEXT` (file path / URL). Binary data is not stored in the database.
->
-> **Value lists — proposed strategy:**
-> [For each: ENUM (short, stable), CHECK constraint (small, may evolve), or reference table (user-managed or long)]
->
-> **Globals classification:**
-> - Session/UI state (not in schema): [list] → frontend store / session
-> - App settings (need a table): [list] → `app_settings` key-value table
->
-> Anything to change before I generate?"
-
-Incorporate all feedback, then proceed.
-
----
-
-## Step 4 — Generate the SQL DDL
-
-Consult [reference/schema-translation-guide.md](../reference/schema-translation-guide.md) for type mapping and naming rules.
-
-Generate sections in this order:
-
-### 4A. ENUM Types
-
-For each value list classified as ENUM:
-```sql
--- From value list: ValueListName
-CREATE TYPE status_type AS ENUM ('Value1', 'Value2', ...);
-```
-
-### 4B. Reference Tables
-
-For user-managed or long value lists:
-```sql
--- From value list: ValueListName
-CREATE TABLE statuses (
-  id         SERIAL PRIMARY KEY,
-  name       VARCHAR(100) NOT NULL UNIQUE,
-  sort_order INTEGER NOT NULL DEFAULT 0
-);
-```
-
-### 4C. App Settings Table
-
-If any globals were classified as app settings:
-```sql
-CREATE TABLE app_settings (
-  key        VARCHAR(100) PRIMARY KEY,
-  value      TEXT,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-```
-
-### 4D. Core Tables (dependency order — referenced tables first)
-
-For each real table:
-```sql
--- Source: FM table "OriginalTableName" (N records, N schema fields)
-CREATE TABLE table_name (
-  id         SERIAL PRIMARY KEY,
-  -- columns from schema fields
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-```
-
-**Type mapping rules:**
-- FM Text → `TEXT` (or `VARCHAR(n)` if max-length validation existed)
-- FM Number (integer/flag) → `INTEGER` or `BOOLEAN`
-- FM Number (decimal/money) → `NUMERIC(p,s)`
-- FM Date → `DATE`
-- FM Time → `TIME`
-- FM Timestamp → `TIMESTAMPTZ`
-- FM Container → `TEXT` with comment: `-- file path reference; binary stored externally`
-- Add `NOT NULL` for fields with "not empty" validation
-- Add `UNIQUE` for fields with unique-value validation
-- Add `CHECK (col IN (...))` for fields with range or value-list validation
-- Add SQL comment for each calculated field: `-- Calculated: [original FM formula]`
-- Add SQL comment for each summary field: `-- Summary: [e.g., SUM of line_items.amount]`
-- Skip global fields entirely
-
-### 4E. Foreign Keys
-
-For each equi-join relationship (operator `=`):
-```sql
--- Source: FM relationship "Description"
-ALTER TABLE child_table
-  ADD CONSTRAINT fk_child_table_parent_table
-  FOREIGN KEY (column)
-  REFERENCES parent_table(id)
-  ON DELETE CASCADE;  -- SET NULL for optional relationships, RESTRICT if unsure
-```
-
-Skip inequality joins — they become WHERE clauses, not FK constraints.
-
-### 4F. Indexes
-
-```sql
--- FK indexes (required for every FK column)
-CREATE INDEX idx_table_column ON table(column);
-
--- Unique indexes (fields with unique validation)
-CREATE UNIQUE INDEX idx_table_column ON table(column);
-
--- Search indexes (fields used in FM find operations — check ddr/specs/05_scripts.json for Enter Find Mode steps)
-CREATE INDEX idx_table_column ON table(column);
-```
-
-### 4G. Child Tables for Repeating Fields
-
-For each repeating field normalized to a child table:
-```sql
-CREATE TABLE parent_child_items (
-  id         SERIAL PRIMARY KEY,
-  parent_id  INTEGER NOT NULL REFERENCES parent(id) ON DELETE CASCADE,
-  value      [type],
-  sort_order INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX idx_parent_child_items_parent_id ON parent_child_items(parent_id);
-```
-
-### 4H. updated_at Trigger (PostgreSQL only)
-
-```sql
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = NOW();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Repeat for each table:
-CREATE TRIGGER set_updated_at
-  BEFORE UPDATE ON table_name
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-```
-
-### 4I. Notes Section
-
-End the file with a comment block:
-
-```sql
--- =============================================================================
--- NOTES
--- =============================================================================
-
--- Globals-only tables (not migrated as database tables):
--- - TableName: proposed disposition
-
--- Calculated fields (implement in application, not database):
--- - TableName.FieldName: original FM calculation
-
--- Summary fields (implement as SQL queries):
--- - TableName.FieldName: e.g., SUM of line_items.amount
-
--- Repeating fields (normalized to child tables):
--- - TableName.FieldName: child table created: child_table_name
-```
-
----
-
-## Step 5 — Write the File
-
-Write the complete SQL to `migration/04_database_schema.sql`.
-
-After writing:
-> "Schema written to `migration/04_database_schema.sql`. [N] tables, [N] foreign keys, [N] indexes. Review before running — especially the globals disposition and any repeating-field normalizations, which may need adjustment once the team sees the generated child tables."
+Report unresolved items next to the DDL. A syntactically valid schema is not complete while key evidence or relationship resolution is missing.

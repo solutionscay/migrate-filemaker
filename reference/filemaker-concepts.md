@@ -1,81 +1,88 @@
-# FileMaker Concepts → Modern Equivalents
+# FileMaker Concepts and Migration Semantics
 
-Use this reference when analyzing a FileMaker solution to understand what each FM construct maps to in a modern web stack.
+Use modern equivalents as design candidates, not mechanical translations. Verify the source behavior and record every intentional semantic change.
 
-## Core Concepts
+## Data and graph
 
-| FileMaker Concept | What It Is | Modern Equivalent | Notes |
-|---|---|---|---|
-| Base Table | Physical data store | Database table | Direct 1:1 mapping |
-| Table Occurrence (TO) | Named reference to a base table on the relationship graph | Query context / join alias | Multiple TOs can point to the same base table. In SQL, this is like table aliases in JOINs. TOs exist only in FM — they do not need a separate structure in the new system. |
-| Field (Normal, stored) | Column in a table | Database column | Direct mapping. Convert FM data types per schema-translation-guide. |
-| Field (Calculated, stored) | Column whose value is computed and stored | Computed/generated column or trigger | Use DB generated columns if the calculation is simple SQL. Otherwise, compute in the application layer. |
-| Field (Calculated, unstored) | Value computed on access, not stored | Virtual column, view, or app-level getter | These are NOT stored in the database. Implement as a computed property or database view. |
-| Summary Field | Aggregate (SUM, COUNT, AVG, etc.) | SQL aggregate query | Never a column. Implement as a query with GROUP BY. |
-| Global Field | Single-value variable shared across sessions | App config, environment variable, session state, or Redis key | NOT a database column. Globals are used for many purposes in FM — analyze each one individually. |
-| Repeating Field | Array of values in a single field | Normalize into a child table or use array column | Repeating fields are an anti-pattern. Prefer normalization. PostgreSQL supports array types if truly needed. |
-| Container Field | Binary data (files, images, PDFs) | File storage (S3, local filesystem) + URL/path column | Store files externally, store the path/URL in the database. |
-
-## Relationships & Graph
-
-| FileMaker Concept | Modern Equivalent | Notes |
+| FileMaker construct | Target candidates | Required checks |
 |---|---|---|
-| Relationship (equi-join) | Foreign key constraint | `parent.id = child.parent_id` |
-| Relationship (inequality join) | WHERE clause / filtered query | FM allows `>=`, `!=`, Cartesian joins. These become query filters, not FK constraints. |
-| Relationship with "Allow creation" | Cascade insert behavior | Implement in app logic — inserting a child record from a parent context. |
-| Relationship with "Delete related" | `ON DELETE CASCADE` | Map directly to FK constraint option. |
-| Multi-predicate relationship | Compound join / composite key | Multiple join conditions become compound WHERE clauses or composite foreign keys. |
-| Self-join relationship | Self-referencing foreign key | Same table, different alias. Common for hierarchies (parent-child). |
+| Base table | Database table | Preserve source identity and fields; decide normalization separately. |
+| Table occurrence | SQL/query alias and context | Resolve occurrence to base table/source file. A relationship side name is often an alias, not a table. |
+| Regular field | Column | Preserve type/coercion, auto-enter, validation, repetitions, indexing, and privileges. |
+| Stored calculation | Authored/stored derived value | A generated column is only one candidate; target restrictions may require application logic or a trigger. |
+| Unstored calculation | Query/view/application computation | Preserve relationship, layout, found-set, privilege, locale, and session context. |
+| Summary field | Aggregate/report query | Meaning may depend on found set, sort parts, and layout context; it is not automatically a global `GROUP BY`. |
+| Repeating field | Ordered child rows or, deliberately, an array | Determine each repetition's meaning and every script/layout dependency before normalizing. |
+| Container / JSON `Binary` | Object storage plus metadata, or database blob | Inventory embedded/external storage, repetitions, filenames, access control, integrity, and migration failures. A URL column alone is not a migration plan. |
+| Relationship | Join/query rule; sometimes a foreign key | Resolve table occurrences, preserve every predicate/operator, and prove referenced uniqueness before adding a constraint. |
+| Allow creation of related records | Contextual create workflow | This is UI/graph behavior, not cascade insert semantics. Specify authorization and defaults. |
+| Delete related records | Candidate ownership/cascade rule | Confirm actual ownership, orphan data, and desired target behavior before `ON DELETE CASCADE`. |
 
-## User Interface
+## Globals and session state
 
-| FileMaker Concept | Modern Equivalent | Notes |
+A hosted FileMaker global field is maintained independently for each client/session. Default its target to per-session or per-request state. A file's hosted initial value and initialization scripts may still act like a default.
+
+Classify each global by observed reads/writes and initialization:
+
+- per-session filter/navigation state;
+- per-session authorization/UI state (never authoritative by itself);
+- temporary calculation/scripting state;
+- user preference that should become durable per-user data;
+- genuinely shared configuration, proven by usage and administration workflow.
+
+Do not map a global to a process-wide variable, environment variable, or shared cache key merely because it has one value in the DDR.
+
+## Layouts and UI
+
+| FileMaker construct | Target candidate | Caveat |
 |---|---|---|
-| Layout | Page / View / Route | Each layout typically maps to a route or page component. |
-| Layout (Form View) | Detail/edit page | Single-record view → form component. |
-| Layout (List View) | List/table page | Multi-record view → data table component with pagination. |
-| Layout (Table View) | Spreadsheet-style grid | Rarely used. Map to a data grid component if needed. |
-| Portal | Related records component / sub-table | Inline display of child records. Becomes a nested list/table component. |
-| Tab Control | Tab component / tabbed interface | Direct UI component mapping. |
-| Slide Control | Carousel / stepper / wizard | Multi-step form or content slider. |
-| Button | Button / link / action trigger | Map to a UI button that calls an API endpoint or triggers client-side logic. |
-| Pop-over | Popover / dropdown / modal | Small overlay UI. |
-| Web Viewer | Iframe / embedded component | Rarely needs migration — evaluate if the embedded content is still needed. |
-| Value List (on a field) | Dropdown / select / radio group | Custom value list → hardcoded options or ENUM. Field-based → dynamic query. |
-| Conditional Formatting | CSS conditional classes / dynamic styles | Implement with conditional CSS classes in the component. |
+| Layout | Page, report, print view, modal, or utility context | Not every layout is a route; several may represent one workflow. |
+| Portal | Related collection/editor | Preserve relationship context, sort/filter, create/delete permission, and row actions. |
+| Value list binding | Select/radio/lookup | Preserve stored vs displayed values, dynamic source, sorting, and access. |
+| Button | UI invocation | Trace its script/action; persistent rules remain server-owned. |
+| Script trigger | Invocation event | Classify by effects. A trigger can invoke server domain logic, client presentation, or both. |
+| Conditional formatting | Presentation rule/domain signal | Preserve CSS/style variant and context; it is not authorization. |
+| Hide object when | UI visibility/affordance | Reconcile protected operations to server authorization. Unnamed rules need raw object attribution. |
 
-## Scripts & Logic
+The current parsed layout contract omits object bounds, static text, tab membership, triggers, control/value-list bindings, and stable keys for many hide/format rules. Require raw XML/screenshots before calling a UI specification implementation-ready.
 
-| FileMaker Concept | Modern Equivalent | Notes |
-|---|---|---|
-| Script (data operation) | API endpoint / service function | Scripts that create/update/delete records become backend operations. |
-| Script (navigation) | Client-side routing | Scripts that just go to layouts/records → router navigation. Usually dropped. |
-| Script (UI interaction) | Event handler / UI logic | Show dialogs, set field values in the UI → client-side JavaScript. |
-| Script (integration) | Service function / worker | Scripts that send email, call APIs, export data → backend service or job queue. |
-| Script Trigger | Event listener / hook | On-entry, on-commit triggers → lifecycle hooks (beforeSave, afterLoad, etc.) |
-| Script Parameter | Function parameter / API request body | FM passes a single text parameter (often JSON). Map to typed function args or request body. |
-| Custom Function | Utility function / helper | Reusable calculation logic → shared utility module. |
+## Scripts and found sets
 
-## Security & Access
+FileMaker scripts execute in context: current file/window/layout/table occurrence, current record, found set, sort order, mode, session globals, account/privilege set, and error state. Preserve or deliberately replace that context.
 
-| FileMaker Concept | Modern Equivalent | Notes |
-|---|---|---|
-| Account | User record | Map to a users table with hashed password. |
-| Privilege Set | Role | Each privilege set becomes a named role (admin, editor, viewer, etc.) |
-| Record-level access | Row-level security (RLS) / authorization middleware | PostgreSQL has built-in RLS. Otherwise, implement in middleware. |
-| Layout access | Route guards / page permissions | Control which pages/routes each role can access. |
-| Script access | API endpoint authorization | Control which endpoints each role can call. |
-| Extended Privilege | Feature flag / capability | Fine-grained permissions (e.g., "can export", "can use API"). |
-| External Authentication | OAuth / LDAP / SSO integration | If FM used Active Directory or OAuth, map to the same provider. |
+- Navigation steps may establish the table occurrence needed by later reads/writes.
+- Find steps create or modify a found set that scopes later loops, exports, and `Replace Field Contents`.
+- `Commit Records/Requests`, error capture, and called scripts affect transaction/error semantics.
+- `ExecuteSQL()` is a calculation function over FileMaker data. `Execute SQL` is an ODBC script step. Treat them separately.
+- `Insert from URL` is an outbound client request, not an inbound webhook receiver.
 
-## Data Patterns
+## Validation and auto-enter
 
-| FileMaker Pattern | What It Does | Modern Implementation |
-|---|---|---|
-| Audit trail via auto-enter | Creation/modification tracking | `created_at`, `updated_at`, `created_by`, `updated_by` columns + triggers or ORM hooks |
-| Serial number auto-enter | Auto-incrementing ID | `SERIAL` / `IDENTITY` column or UUID primary key |
-| Looked-up value | Copy value from related record | Denormalization — query the related table instead, or use a trigger if denorm is intentional |
-| Auto-enter calculation | Set a default value | Column `DEFAULT` expression or application-layer default |
-| Validation rule | Input constraint | Database `CHECK` constraint + frontend validation + API validation |
-| Unique value validation | Uniqueness constraint | `UNIQUE` constraint on the column |
-| Not empty validation | Required field | `NOT NULL` constraint + frontend required attribute |
+FileMaker validation can vary by timing, validate-if-modified behavior, user override privilege, custom message, calculation, range, value list, data type, and uniqueness/not-empty options. Auto-enter behavior can be creation-only, replace-existing, contextual, or user-overridable.
+
+Therefore:
+
+- `Not empty` is not automatically equivalent to unconditional SQL `NOT NULL`.
+- `Unique` is not automatically equivalent to an immediate database `UNIQUE` constraint.
+- auto-enter serial/calculation is not automatically a primary key/default/generated column.
+
+Profile existing data and record a product decision before strengthening these rules in the database. Preserve user-facing validation messages and API enforcement where required.
+
+## Identity and security
+
+| FileMaker construct | Target concern |
+|---|---|
+| Account | Identity to provision/map; the DDR exposes no password/hash to migrate. |
+| Privilege set | Role/capability bundle, not necessarily one target role without decomposition. |
+| Record access predicate | Server row policy/service authorization. |
+| Field restriction | Read/write projection and mutation authorization. |
+| Layout access | Route/page access plus underlying operation/data checks. |
+| Script/value-list access | Operation/capability and lookup-data authorization. |
+| Extended privilege | Access channel/capability; current parsed specs do not emit this catalog. |
+| External authentication | IdP/account mapping, invitation/reset, service principals, disabled accounts, and cutover. |
+
+Start with `07_security.json`, then supplement it with raw/manual extended privileges and UI hide/format evidence. Deny by default and test forbidden reads and writes. A hidden button is not a security boundary.
+
+## Time semantics
+
+FileMaker Date, Time, and TimeStamp values do not carry an embedded timezone. Establish the source office/server timezone, DST ambiguity/nonexistence policy, historical changes, and whether a value represents a local civil time or an instant before choosing `TIMESTAMP`, `TIMESTAMPTZ`, or an application type. Test boundary dates during migration.

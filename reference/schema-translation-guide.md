@@ -1,237 +1,130 @@
 # Schema Translation Guide
 
-Rules and patterns for converting a FileMaker data model to a relational database schema.
+Use this guide to make evidenced mapping decisions. Do not generate a target schema by mechanically renaming fields or adding surrogate keys.
 
-## Data Type Mapping
+## Source tokens and target candidates
 
-### PostgreSQL (Recommended)
+FileMaker's UI terminology and the current parsed JSON tokens differ:
 
-| FM Data Type | PostgreSQL Type | Notes |
-|---|---|---|
-| Text | `TEXT` or `VARCHAR(n)` | Use `TEXT` unless a max length is enforced by validation. Use `VARCHAR(n)` if FM has a max character validation. |
-| Number | `INTEGER` | If the field has no decimal values and is used for IDs, counts, or flags. |
-| Number | `NUMERIC(p,s)` or `DECIMAL(p,s)` | If the field stores money or precise decimals. Check FM field formatting for decimal places. |
-| Number | `BIGINT` | If values may exceed 2 billion (rare in FM). |
-| Number | `BOOLEAN` | If the field only contains 0/1 and is used as a flag. Check value lists and usage. |
-| Date | `DATE` | Direct mapping. |
-| Time | `TIME` | Direct mapping. FM stores time as seconds since midnight; PostgreSQL uses HH:MM:SS. |
-| Timestamp | `TIMESTAMPTZ` | Always use timezone-aware timestamps. |
-| Container | `TEXT` | Store the file URL/path, not the binary data. Use external file storage (S3, local disk). |
+| FileMaker UI type | Parsed `data_type` | PostgreSQL candidate | Decision required |
+|---|---|---|---|
+| Text | `Text` | `TEXT`, constrained `VARCHAR`, enum/reference table | Length, collation, case/accent search, empty vs null, value-list semantics. |
+| Number | `Number` | `INTEGER`, `BIGINT`, `NUMERIC(p,s)`, `DOUBLE PRECISION` | Decimal precision, rounding, scientific values, identifiers stored as numbers. |
+| Date | `Date` | `DATE` | Invalid/empty legacy values and calendar assumptions. |
+| Time | `Time` | `TIME` or duration representation | Time-of-day versus elapsed duration. |
+| Timestamp | `TimeStamp` | `TIMESTAMP` or `TIMESTAMPTZ` | Source timezone, DST policy, and local-civil-time versus instant meaning. |
+| Container | `Binary` | Object/blob reference plus metadata, or `BYTEA` | Embedded/external storage, repetitions, filenames, access, integrity, and transfer. |
 
-### MySQL Alternative
+Inspect actual distinct tokens and fail on unknown values. `field_type` describes Normal/Calculated/Summary, not Container.
 
-| FM Data Type | MySQL Type | Notes |
-|---|---|---|
-| Text | `VARCHAR(255)` or `TEXT` | MySQL requires length for VARCHAR. Use TEXT for long content. |
-| Number | `INT` / `DECIMAL(p,s)` / `BIGINT` / `TINYINT(1)` | Same logic as PostgreSQL. |
-| Date | `DATE` | Direct mapping. |
-| Time | `TIME` | Direct mapping. |
-| Timestamp | `DATETIME` | MySQL's DATETIME is timezone-naive. Use application-level TZ handling. |
-| Container | `VARCHAR(500)` | File path/URL reference. |
+For MySQL/SQLite or another target, choose semantically equivalent types after the same decisions; do not copy a PostgreSQL mapping blindly.
 
-### SQLite Alternative
+## Time conversion
 
-| FM Data Type | SQLite Type | Notes |
-|---|---|---|
-| Text | `TEXT` | SQLite has flexible typing. |
-| Number | `INTEGER` or `REAL` | Use INTEGER for whole numbers, REAL for decimals. |
-| Date / Time / Timestamp | `TEXT` | Store as ISO 8601 strings. SQLite has no native date type. |
-| Container | `TEXT` | File path/URL reference. |
+FileMaker timestamps contain no embedded timezone. Before using `TIMESTAMPTZ`:
 
-## Naming Convention Translation
+1. identify the server/office timezone for each source;
+2. determine whether the value represents a local civil time or an instant;
+3. define ambiguous/nonexistent DST handling and historical timezone changes;
+4. profile values around boundaries;
+5. write round-trip fixtures.
 
-FileMaker uses varied naming (camelCase, spaces, prefixes). Convert to `snake_case` for the database.
+Store timezone metadata separately when the originating zone matters. Use timezone-naive target values deliberately for civil-time concepts such as an office opening time.
 
-### Rules
+## Keys and identifiers
 
-1. **Table names:** Lowercase, plural, snake_case
-   - `InvoiceLineItems` → `invoice_line_items`
-   - `The Sitting Room` → `sitting_rooms` (drop articles)
-   - `tbl_Customers` → `customers` (drop Hungarian prefixes)
+Do not infer a primary key from the name `ID`, auto-enter serial behavior, or relationship participation.
 
-2. **Column names:** Lowercase, snake_case
-   - `FirstName` → `first_name`
-   - `Date Created` → `date_created` (but prefer `created_at`)
-   - `fk_CustomerID` → `customer_id` (drop prefixes, keep the reference clear)
-   - `z_SortOrder` → `sort_order` (drop utility prefixes)
-   - `_pk_ID` → `id` (simplify primary key names)
+For each candidate key, collect:
 
-3. **Foreign keys:** `{referenced_table_singular}_id`
-   - `CustomerID` on Invoices → `customer_id`
-   - `InvoiceID` on LineItems → `invoice_id`
+- source file/table/field ids and types;
+- auto-enter and modification behavior;
+- uniqueness/not-empty settings with timing/override semantics;
+- actual null/duplicate profile;
+- incoming/outgoing relationship predicates;
+- external/public uses and leading-zero/case behavior.
 
-4. **Boolean columns:** Prefix with `is_` or `has_`
-   - `Active` → `is_active`
-   - `Paid` → `is_paid`
+Preserve authored business/legacy identifiers. Add a surrogate `IDENTITY`/UUID only as an explicit design decision with a reversible source-to-target mapping. A target foreign key may reference only a proven unique key of compatible type. Preserve composite keys when they express real identity.
 
-## Primary Key Strategy
+## Table occurrences and relationships
 
-FileMaker often uses its internal record ID or a serial number field. Choose one approach:
+Resolve each relationship side through `02_table_occurrences.json`; an occurrence name is an alias and may point to an external file's base table.
 
-### Option A: Serial Integer (Simple, Fast)
-```sql
-id SERIAL PRIMARY KEY  -- PostgreSQL
-id INT AUTO_INCREMENT PRIMARY KEY  -- MySQL
-```
-Best for: Simple apps, small scale, no distributed systems.
+The parser emits operator tokens such as `Equal`, `NotEqual`, `GreaterThan`, `LessThan`, and `CartesianProduct`, not SQL punctuation. Preserve every predicate and its order.
 
-### Option B: UUID (Distributed-Safe)
-```sql
-id UUID PRIMARY KEY DEFAULT gen_random_uuid()  -- PostgreSQL
-id CHAR(36) PRIMARY KEY  -- MySQL (use app-generated UUIDs)
-```
-Best for: Apps that may sync data, have multiple write sources, or need globally unique IDs.
+- `Equal` can support a foreign key only when the referenced side is proven unique and the relationship expresses identity rather than filtering.
+- Multiple equality predicates may form a composite join/foreign key.
+- Inequality and cartesian relationships become query/domain/UI-context rules, not foreign keys.
+- "Allow creation" is contextual create behavior, not database cascade insert.
+- "Delete related" is evidence to investigate, not automatic approval for `ON DELETE CASCADE`.
 
-**Recommendation:** Use serial integers unless there's a specific need for UUIDs. FM's serial numbers map cleanly to `SERIAL`.
+Record a disposition for every relationship predicate and every unresolved occurrence.
 
-## Standard Columns
+## Calculated and summary fields
 
-Add these to every table:
+Classify each authored calculation by storage/context and dependencies:
 
-```sql
-id          SERIAL PRIMARY KEY,
-created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-```
+- row-local deterministic derived value;
+- related/context-dependent lookup;
+- aggregate/found-set/layout summary;
+- validation or auto-enter behavior;
+- display/serialization helper;
+- persistent domain rule.
 
-If the FM solution tracks created/modified by:
-```sql
-created_by  INTEGER REFERENCES users(id),
-updated_by  INTEGER REFERENCES users(id)
-```
+Target candidates include application computation, query/view, materialized view, database trigger, ordinary stored column maintained by a service, or generated column. PostgreSQL generated expressions have restrictions and are not a generic translation for related-table, aggregate, volatile, or context-dependent FileMaker calculations.
 
-## Pattern: Audit Fields
+Summary fields often depend on found set, sort order, and layout parts. Prove their reporting semantics before replacing them with a generic aggregate.
 
-FM commonly has auto-enter fields for creation/modification tracking. These map directly:
+## Validation and constraints
 
-| FM Field | SQL Column | Implementation |
-|---|---|---|
-| `CreationTimestamp` | `created_at TIMESTAMPTZ DEFAULT NOW()` | Database default |
-| `ModificationTimestamp` | `updated_at TIMESTAMPTZ DEFAULT NOW()` | Update via trigger or ORM hook |
-| `CreatedBy` / `AccountName (creation)` | `created_by INTEGER REFERENCES users(id)` | Set by application on insert |
-| `ModifiedBy` / `AccountName (modification)` | `updated_by INTEGER REFERENCES users(id)` | Set by application on update |
+FileMaker validation may be conditional by timing, validate-if-modified state, override privilege, custom message, range, member-of-list, calculation, type, uniqueness, or non-empty setting. The current parsed field records may expose only a subset.
 
-## Pattern: Value Lists → ENUMs or Reference Tables
+Treat SQL constraints as target product invariants:
 
-### Custom Value Lists (Static Options)
+1. extract the complete rule or label it unavailable;
+2. profile existing violations;
+3. decide whether the target deliberately strengthens behavior;
+4. define import cleanup/rejection;
+5. reproduce user-facing/API error behavior;
+6. add negative tests.
 
-**Option A: PostgreSQL ENUM**
-```sql
-CREATE TYPE status_type AS ENUM ('Draft', 'Active', 'Archived');
+Do not automatically map FileMaker `Not empty` to unconditional `NOT NULL` or `Unique` to immediate `UNIQUE`.
 
-ALTER TABLE documents ADD COLUMN status status_type NOT NULL DEFAULT 'Draft';
-```
-Use for: Short, stable lists that rarely change.
+## Auto-enter, lookups, and audit fields
 
-**Option B: CHECK Constraint**
-```sql
-ALTER TABLE documents
-  ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'Draft'
-  CHECK (status IN ('Draft', 'Active', 'Archived'));
-```
-Use for: Lists that may evolve but are still small.
+Capture creation-only versus replace-existing behavior, user override, dependency context, and modification conditions.
 
-**Option C: Reference Table**
-```sql
-CREATE TABLE statuses (
-  id    SERIAL PRIMARY KEY,
-  name  VARCHAR(50) NOT NULL UNIQUE,
-  sort_order INTEGER NOT NULL DEFAULT 0
-);
-```
-Use for: Lists managed by users, or lists with additional metadata.
+- Creation/modification timestamps and accounts may map to database/application audit columns only after actor/time semantics are proven.
+- Looked-up values may intentionally preserve a historical snapshot; replacing them with a live join can change history.
+- Auto-enter calculations may require service logic rather than a SQL default.
+- Serial values may be public identifiers without being the desired target primary key.
 
-### Field-Based Value Lists (Dynamic Lookups)
+## Globals, repetitions, and containers
 
-These are just queries against the source table:
-```sql
--- FM: Value list showing CustomerName from Customers table
-SELECT DISTINCT name FROM customers ORDER BY name;
-```
+- Hosted globals default to per-session state. Classify each by reads/writes and initialization before promoting it to shared config or durable user preferences.
+- Repeating fields usually become ordered child rows, but preserve repetition number and all script/layout behavior. Arrays are a deliberate alternative, not a default shortcut.
+- Container migration requires a manifest, content hash, filename/MIME metadata, authorization, missing/corrupt-file handling, object-store key strategy, and source-to-target reconciliation.
 
-No special schema needed — implement as a query in the API.
+## Naming and traceability
 
-## Pattern: Repeating Fields → Normalization
+Choose a consistent target naming convention, but keep a mapping table containing source file/table/field ids and original names. Detect case-insensitive collisions, reserved words, punctuation-only differences, and multiple table occurrences before emitting DDL.
 
-FM repeating fields store multiple values in one field (an anti-pattern). Normalize into a child table:
+Every target column and constraint must cite one of:
 
-**FM:** `PhoneNumber` (repeating, 3 reps) on `Contacts`
+- direct source evidence;
+- profiled data evidence;
+- stakeholder-approved product decision;
+- target-platform requirement.
 
-**SQL:**
-```sql
-CREATE TABLE contact_phones (
-  id          SERIAL PRIMARY KEY,
-  contact_id  INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-  phone       VARCHAR(20) NOT NULL,
-  sort_order  INTEGER NOT NULL DEFAULT 0
-);
-```
+## Data-load verification
 
-If there are only 2–3 fixed repetitions with known meanings, consider separate columns instead:
-```sql
-ALTER TABLE contacts ADD COLUMN phone_home VARCHAR(20);
-ALTER TABLE contacts ADD COLUMN phone_work VARCHAR(20);
-ALTER TABLE contacts ADD COLUMN phone_mobile VARCHAR(20);
-```
+Row counts are necessary but insufficient. Verify:
 
-## Pattern: Global Fields → Application Config
-
-FM globals are NOT database columns. Map them by usage:
-
-| Global Usage | Modern Implementation |
-|---|---|
-| App settings (company name, defaults) | Config table (key-value) or environment variables |
-| Session state (current user, filter) | Session/cookie data or frontend state |
-| Temporary variables (dialog inputs) | Frontend component state |
-| Report parameters (date range, filter) | API query parameters |
-| Constants (tax rate, version) | Application constants or config file |
-
-## Pattern: Calculated Fields
-
-| Calc Type | Implementation |
-|---|---|
-| Simple formula (field1 + field2) | Database generated column: `total NUMERIC GENERATED ALWAYS AS (quantity * unit_price) STORED` |
-| Formula referencing related data | Application-layer computed property or database view |
-| Conditional logic (Case/If) | Application layer or CASE expression in a view |
-| Text formatting (concatenation) | Application layer — full name, display strings, etc. |
-| Aggregate (Sum of related) | SQL query with JOIN and aggregate function |
-
-## Pattern: Relationships → Foreign Keys
-
-### Simple Equi-Join
-```
-FM:  Customers::CustomerID = Invoices::CustomerID
-SQL: invoices.customer_id REFERENCES customers(id)
-```
-
-### With Delete Related
-```
-FM:  Delete related records in Invoices when Customer deleted
-SQL: ON DELETE CASCADE
-```
-
-### With Allow Creation
-```
-FM:  Allow creation of related Invoices from Customers
-SQL: No schema impact — this is application behavior (UI allows adding child records)
-```
-
-### Inequality / Cartesian Join
-```
-FM:  Table1::Date >= Table2::StartDate
-SQL: Not a foreign key. Implement as a query JOIN with WHERE clause.
-```
-
-## Index Strategy
-
-Create indexes for:
-1. **All foreign keys** — essential for JOIN performance
-2. **Fields used in FM finds/searches** — identify from script steps and layout search fields
-3. **Unique fields** — any field with unique validation
-4. **Sort fields** — fields commonly used for sorting (check script sort steps)
-
-```sql
-CREATE INDEX idx_invoices_customer_id ON invoices(customer_id);
-CREATE INDEX idx_invoices_date ON invoices(invoice_date);
-CREATE UNIQUE INDEX idx_customers_email ON customers(email);
-```
+- per-column null/distinct/min/max/length/domain profiles;
+- stable-value hashes where ordering/canonicalization are defined;
+- duplicate keys and orphan references;
+- rejected/changed rows with reasons;
+- container counts and content hashes;
+- timezone/encoding/decimal edge cases;
+- calculated/business totals and ownership rules;
+- forbidden values and constraint behavior.

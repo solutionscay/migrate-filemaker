@@ -1,33 +1,28 @@
-# Specialized Business Logic Detection
+# Specialized Business-Logic Detection
 
-Use these signals to identify scripts containing domain-specific logic that can't be inferred from the app type and must be carefully migrated. Run this analysis after producing the standard App Summary sections; present findings as a dedicated "Specialized Business Logic" section.
+Use these signals to prioritize manual review. They are features, not proof: score every script before considering it plumbing, and confirm meaning from full steps, calculations, comments, call sites, and field effects.
 
-## Detection Signals (in priority order)
+## Detection signals
 
-1. **Custom function calls in script calculations** — Cross-reference `08_custom_functions.json` against script step calculations. If a script's Set Variable or Set Field steps reference custom functions by name, flag it. Custom functions are almost always purpose-built domain logic.
-2. **ExecuteSQL steps** — Any script containing an ExecuteSQL step is doing hand-crafted data operations beyond standard FileMaker. Always flag.
-3. **Multi-table writes** — If a script does Set Field against 3+ different base tables (resolve table occurrences to base tables), it's orchestrating a multi-entity transaction. Flag it.
-4. **Calculation density** — If >40% of a script's steps are Set Variable/Set Field with non-trivial calculations (containing `+`, `-`, `*`, `/`, or functions like `Round`, `Case` with multiple branches, nested function calls), it's implementing an algorithm, not plumbing.
+1. **Durable writes and invariants**: field changes, record creation/deletion, account changes, or validation that affect persistent state. Resolve table occurrences to base tables and reconstruct record/found-set scope.
+2. **ExecuteSQL calculation calls**: search calculation values in structured `params` and `step_text` for `ExecuteSQL (`. This is a FileMaker calculation function. Keep it distinct from the `Execute SQL` ODBC script step.
+3. **Multi-entity orchestration**: writes to several base tables, compound transaction/error handling, or dependencies across called scripts.
+4. **Branching/calculation complexity**: nested `Case`/`If`, domain thresholds, date windows, rounding/allocation, state transitions, or dense computed writes.
+5. **Custom-function calls**: cross-reference `08_custom_functions.json`, then inspect the function body and callers. A custom function may be a generic utility; its existence alone is not a domain signal.
+6. **Authorization and routing decisions**: privilege-set checks, account/role state, record ownership predicates, field/layout access, and scripts that select a destination based on access.
+7. **External effects**: outbound HTTP/email/export/import, ODBC, filesystem/plugin activity, or calls to missing FileMaker files.
+8. **Developer evidence**: populated comments or `step_text` that describe exceptions, compliance, calculation intent, or return contracts.
 
-## Plumbing Filters (exclude before scoring)
+## Name/folder hints
 
-- Script groups named: Navigation, Nav, UI, Utility, Debug, Startup, Triggers, or similar
-- Script names matching: "Go To", "Navigate", "Open", "Close", "Toggle", "Show", "Hide", "Refresh"
-- Scripts that are only Perform Script calls (dispatchers/routers)
-- Scripts where all steps are navigation + one dialog
+Names such as Navigation, Utility, Startup, Trigger, Open, Close, Go To, Show, Hide, or Refresh reduce confidence only after effects are traced. They are never exclusion filters. Dispatchers and trigger handlers can be the entry point to critical server-owned logic.
 
-## Output Format
+## Output
 
-Group flagged scripts by functional domain (using script group paths and table targets) and present as:
+Group proven candidates by functional domain and report:
 
-> **Specialized Business Logic**
->
-> Found N scripts across M functional areas that contain domain-specific logic requiring careful migration:
->
-> 1. **[Domain name]** — N scripts, references custom functions `FuncA`, `FuncB`. [Brief description of what the logic appears to do based on function names, field targets, and calculation content.]
-> 2. **[Domain name]** — N scripts with ExecuteSQL-based [operation]. Writes across tables: X, Y, Z.
-> 3. ...
->
-> These will be explored in detail during Discovery.
+```text
+Domain | Script identity | Evidence | Durable effects | Calls/dependencies | Confidence | Open questions
+```
 
-If no specialized business logic is detected, note: "No specialized business logic detected — all scripts appear to be standard app plumbing that can be recreated from the data model and app type."
+If no specialized logic is proven, say: `No specialized business logic was proven in the reviewed catalogs.` Also state coverage and unresolved/missing sources. Never conclude that all behavior is reproducible from the data model merely because the detector found no candidates.

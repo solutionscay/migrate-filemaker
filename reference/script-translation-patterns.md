@@ -1,267 +1,111 @@
 # Script Translation Patterns
 
-Patterns for converting FileMaker script steps into modern code. Use this reference when categorizing scripts and generating the business logic mapping in Phase 4.
+Translate complete FileMaker behavior, not isolated step names. A step's meaning depends on window/layout/table-occurrence context, current record, found set, mode, sort order, session globals, privilege set, variables, called scripts, and error state.
 
-## Script Step → Code Mapping
+## Translation record
 
-### Data Operations
+For each script or operation, capture:
 
-| FM Script Step | Modern Equivalent | Context |
+```text
+source identity | inputs/context | preconditions | reads | writes | found-set scope |
+calls/external effects | transaction/error behavior | result | target owner | authorization | tests
+```
+
+Read both structured `params` and `step_text`; preserve populated comments as evidence.
+
+## Data operations
+
+| FileMaker step | Candidate target | Required semantic reconstruction |
 |---|---|---|
-| `Set Field [table::field; value]` | `UPDATE table SET field = value WHERE id = ?` | Backend: SQL update. Frontend: form field binding. |
-| `New Record/Request` | `INSERT INTO table (...) VALUES (...)` | API: POST endpoint. |
-| `Delete Record/Request` | `DELETE FROM table WHERE id = ?` | API: DELETE endpoint. Confirm before executing. |
-| `Delete All Records` | `DELETE FROM table` or `TRUNCATE` | Rare. Add confirmation and authorization check. |
-| `Commit Records/Requests` | Transaction commit / save | FM auto-saves unless scripted. In web apps, this is the POST/PUT request. |
-| `Revert Record/Request` | Discard form changes | Frontend: reset form to original values. |
-| `Duplicate Record/Request` | `INSERT INTO ... SELECT ... FROM ...` | API: POST endpoint that copies from an existing record. |
-| `Set Field By Name [field; value]` | Dynamic property assignment | Backend: parameterized update. Use with caution — validate field names. |
-| `Replace Field Contents` | `UPDATE table SET field = value` (no WHERE) | Bulk update. Implement as a batch API endpoint with authorization. |
+| `Set Field` | Typed service mutation/form update | Current record/TO, calculation coercion, privileges, validation, and commit behavior. |
+| `Set Field By Name` | Allowlisted dynamic mutation | Resolve/allowlist the target; never accept an arbitrary client column name. |
+| `New Record/Request` | Create operation or a new find request | Mode determines whether this creates data or adds query criteria. |
+| `Delete Record/Request` | Authorized delete | Current record, related-delete behavior, confirmation, audit, and ownership. |
+| `Delete All Records` | Explicit administrative bulk delete | Prove table/found-set semantics and require narrow authorization, audit, dry-run/count, and recovery. Never infer `TRUNCATE`. |
+| `Commit Records/Requests` | Transaction/save boundary | Include validations, triggers, conflict handling, and `Get(LastError)` behavior. |
+| `Revert Record/Request` | Rollback/discard | Determine whether it reverts only the current record/request and what prior commits remain. |
+| `Duplicate Record/Request` | Copy operation | Identify copied/auto-entered/related values and authorization. |
+| `Replace Field Contents` | Scoped bulk update | It operates on the current found set. Reconstruct an explicit target predicate or list of record keys. Refuse translation when scope cannot be proven; never emit an unqualified `UPDATE`. |
 
-### Navigation
+## Find and record context
 
-| FM Script Step | Modern Equivalent | Context |
+Treat the following as a state machine, not independent query snippets:
+
+- `Enter Find Mode` begins request construction.
+- `Set Field` in find mode adds criteria with FileMaker operators/coercion.
+- `New Record/Request` in find mode adds an OR request.
+- `Omit Record`, `Extend Found Set`, `Constrain Found Set`, and `Show Omitted Only` transform a set.
+- `Perform Find` materializes the found set and error behavior.
+- `Sort Records` changes order used by navigation, summaries, and reports.
+- `Go to Record`, loops, exports, printing, and replacement operate on that set/order.
+- `Show All Records` expands scope and is high risk before a bulk write/export.
+
+Translate a found set into a parameterized predicate or an explicit server-side collection of authorized record identifiers. Preserve row authorization in addition to the legacy criteria.
+
+## Control flow and calls
+
+| FileMaker pattern | Target candidate | Caveat |
 |---|---|---|
-| `Go to Layout [name]` | `router.push('/route')` | Client-side navigation. Often dropped — the new app's routing handles this. |
-| `Go to Record [First/Last/Next/Previous]` | Pagination / record navigation | Implement with query params: `?page=1&limit=20`. |
-| `Go to Related Record [table; layout]` | Navigate to filtered list | `router.push('/related-items?parent_id=123')`. |
-| `Go to Field [field]` | Focus input | `document.getElementById('field').focus()` — usually dropped. |
-| `Close Window` / `Close File` | Close tab/modal | Usually dropped or becomes `router.back()`. |
-| `New Window` | Open new tab/modal | Modal dialog or `window.open()`. Evaluate if truly needed. |
-| `Select Window` | Focus window/tab | Usually dropped. |
+| `If` / `Else If` / `Else` | Conditional | Preserve FileMaker truthiness, empty/null, error, and type coercion where observable. |
+| `Loop` / `Exit Loop If` | Loop, set-based query, or batch job | A set-based rewrite must preserve found-set membership, order, per-record error behavior, and side effects. |
+| `Perform Script` | Function/service call | Preserve parameter/result, file context, call stack, and error propagation. |
+| `Perform Script on Server` | Server operation/job | Determine session/context differences and whether the caller waits for a result. |
+| `Exit Script` | Typed return | Preserve result encoding and caller expectations. |
+| `Halt Script` | Abort the operation chain | It can stop more than a local helper; trace callers. |
+| `$var` / `$$var` | Local / per-session state | Hosted globals and `$$` variables are not process-wide shared state by default. |
 
-### Find/Query Operations
+## UI and trigger behavior
 
-| FM Script Step | Modern Equivalent | Context |
+Navigation, dialogs, focus, window management, and loading feedback may become client behavior. Classify the invoked effects first:
+
+- A trigger that only formats or focuses may be client-owned.
+- A trigger that validates a durable invariant or writes persistent state requires a server-owned operation; the client can invoke it but cannot be the only enforcement point.
+- A navigation/router script can still contain authorization decisions or initialize session context.
+- Button visibility and client validation supplement, not replace, server authorization and validation.
+
+Do not label every script attached to `OnObjectEnter`, `OnObjectModify`, `OnRecordCommit`, or another trigger as a UI handler.
+
+## Integrations
+
+| FileMaker construct | Direction/target | Required checks |
 |---|---|---|
-| `Enter Find Mode` | Build query parameters | Frontend: open search form. |
-| `Set Field [in find mode]` | Add WHERE clause | Each Set Field in find mode adds a search criterion. |
-| `Perform Find` | `SELECT ... WHERE ...` | API: GET endpoint with query parameters. |
-| `Extend Found Set` | `OR` clause | Append additional WHERE conditions with OR. |
-| `Constrain Found Set` | `AND` clause | Append additional WHERE conditions with AND. |
-| `Show All Records` | Remove WHERE clause | API: GET without filters. |
-| `Sort Records` | `ORDER BY` clause | API: query parameter `?sort=field&order=asc`. |
-| `Omit Record` | `NOT` in WHERE | Exclude specific records from results. |
-| `Show Omitted Only` | Invert selection | Rarely needed. Implement as an inverted query. |
+| `Insert from URL` | Outbound HTTP/client request | URL/method/body/headers, redacted credentials, response parsing, timeout, TLS, retry/idempotency, and egress policy. It is not evidence of an inbound webhook. |
+| `Open URL` | User navigation or outbound invocation | Determine whether a browser opens or an integration protocol is called. |
+| `Send Mail` | Outbound email service/job | Recipients, templates, attachments, audit, retry, and failure handling. |
+| Import/export | Inbound/outbound file pipeline | Found-set scope, field order, encoding, filenames, overwrite, scheduling, and rejected rows. |
+| `ExecuteSQL()` | FileMaker calculation query | Parse calculation inputs and query semantics; parameterize the target equivalent. |
+| `Execute SQL` | ODBC script step | Identify external DSN/database, SQL, bindings, transaction, and credentials. |
+| Plugin/external script | Adapter or replacement workflow | Inventory availability, side effects, platform dependence, and missing code. |
 
-### Control Flow
+Never print or copy credential literals from DDR calculations. Document only their source location and purpose, then replace them with managed secret references.
 
-| FM Script Step | Modern Equivalent | Context |
-|---|---|---|
-| `If [condition]` / `Else If` / `Else` / `End If` | `if/else if/else` | Direct mapping to any language's conditional. |
-| `Loop` / `Exit Loop If [condition]` / `End Loop` | `for`/`while` loop with `break` | Direct mapping. In modern code, prefer `for...of` or `array.forEach`. |
-| `Perform Script [name; parameter]` | Function call or API call | If same module: direct function call. If different service: API call. |
-| `Perform Script on Server` | Backend service call / job queue | This was already a server-side operation. Map to an API endpoint or background job. |
-| `Exit Script [result]` | `return value` | Function return statement. |
-| `Halt Script` | `return` (stop all execution) | Exit current operation. In web apps, stop the request handler. |
-| `Set Variable [$var; value]` | `const var = value` | Local variable assignment. |
-| `Set Variable [$$var; value]` | Application/session state | `$$` globals → session storage, app state, or module-level variable. |
+## Transactions, errors, and concurrency
 
-### User Interface
+`Set Error Capture`, `Open Transaction`, `Commit Transaction`, `Revert Transaction`, record commits, called scripts, and `Get(LastError)` collectively define failure behavior. Translate the complete boundary.
 
-| FM Script Step | Modern Equivalent | Context |
-|---|---|---|
-| `Show Custom Dialog [title; message]` | Modal dialog / alert / confirm | Frontend: modal component with buttons. |
-| `Show/Hide Toolbars` | Toggle UI elements | Usually dropped. Implement with CSS/component visibility. |
-| `Freeze Window` / `Refresh Window` | Loading state | Show spinner or loading overlay while processing. |
-| `Scroll Window` | `window.scrollTo()` | Rarely needed. |
-| `Beep` | Notification sound | Usually dropped. Use toast notifications instead. |
-| `Set Zoom Level` | CSS zoom/scale | Usually dropped. |
-| `Allow User Abort` | Cancellation support | Implement with AbortController or cancel button. |
-| `Set Error Capture` | Try/catch | Error handling wrapper. |
+Specify:
 
-### Integrations
+- atomic records/tables and external effects;
+- lock/conflict behavior and retry policy;
+- partial progress and compensation;
+- validation/error codes surfaced to callers;
+- idempotency for retryable operations;
+- audit actor/time/reason.
 
-| FM Script Step | Modern Equivalent | Context |
-|---|---|---|
-| `Send Mail [To; Subject; Body]` | Email service (SMTP, SendGrid, etc.) | Backend: email sending service/function. |
-| `Export Records` | Data export endpoint | API: GET endpoint returning CSV/Excel. |
-| `Import Records` | Data import endpoint | API: POST endpoint accepting CSV/Excel upload. |
-| `Insert from URL` | HTTP client request (`fetch`, `axios`) | Backend: call external API. |
-| `Open URL` | `window.open(url)` or redirect | Frontend: external link. |
-| `Execute SQL` | Direct SQL query | Already using SQL — map the query directly. Check for injection risks. |
-| `Print Setup` / `Print` | Print stylesheet / PDF generation | Frontend: CSS `@media print`. Backend: PDF generation library. |
-| `Save Records as PDF` | PDF generation | Backend: use a PDF library (Puppeteer, wkhtmltopdf, etc.) |
-| `Save Records as Excel` | Excel export | Backend: use an Excel library (ExcelJS, openpyxl, etc.) |
+An example SQL transaction is not proof that a multi-script FileMaker sequence was atomic.
 
-## Multi-Step FM Idioms
+## Categorize by ownership, not invocation
 
-These are common patterns in FM scripts that combine multiple steps into a single logical operation.
+- `server-domain`: persistent invariants, writes, validation, authorization, state transitions.
+- `server-query`: authorized reads, finds, reports, aggregates.
+- `background-job`: scheduled/long-running/retryable effects.
+- `external-adapter`: HTTP/email/file/ODBC/plugin boundary.
+- `client-presentation`: focus, display, local interaction with no trusted invariant.
+- `drop-candidate`: behavior made obsolete by the target, after dependencies are traced.
+- `unresolved`: insufficient context.
 
-### Find Related Records
-```
-FM Pattern:
-  Go to Layout ["InvoiceLines"]
-  Enter Find Mode
-  Set Field [InvoiceLines::InvoiceID; $invoiceId]
-  Perform Find
+A user action may call a server-domain operation; that does not make the operation a generic CRUD endpoint. A drop candidate is not dropped until call sites and side effects prove it safe.
 
-Modern Equivalent:
-  GET /api/invoice-lines?invoice_id=123
+## Verification
 
-  // Backend
-  async function getInvoiceLines(invoiceId) {
-    return db.query('SELECT * FROM invoice_lines WHERE invoice_id = $1', [invoiceId]);
-  }
-```
-
-### Create Record with Fields
-```
-FM Pattern:
-  Go to Layout ["Invoices"]
-  New Record/Request
-  Set Field [Invoices::CustomerID; $customerId]
-  Set Field [Invoices::Date; Get(CurrentDate)]
-  Set Field [Invoices::Status; "Draft"]
-  Commit Records/Requests
-
-Modern Equivalent:
-  POST /api/invoices
-  Body: { "customer_id": 123, "status": "Draft" }
-
-  // Backend
-  async function createInvoice(data) {
-    // date defaults to NOW() via database default
-    return db.query(
-      'INSERT INTO invoices (customer_id, status) VALUES ($1, $2) RETURNING *',
-      [data.customer_id, data.status ?? 'Draft']
-    );
-  }
-```
-
-### Loop Through Found Set
-```
-FM Pattern:
-  Go to Record [First]
-  Loop
-    Set Field [Records::Processed; 1]
-    Go to Record [Next; Exit after last]
-  End Loop
-
-Modern Equivalent:
-  // Batch update — single query, no loop needed
-  async function markAllProcessed(recordIds) {
-    return db.query(
-      'UPDATE records SET is_processed = true WHERE id = ANY($1)',
-      [recordIds]
-    );
-  }
-```
-
-### Scripted Find with Multiple Criteria
-```
-FM Pattern:
-  Enter Find Mode
-  Set Field [Orders::Status; "Open"]
-  Set Field [Orders::Date; ">" & $startDate]
-  New Record/Request  (extends found set)
-  Set Field [Orders::Status; "Pending"]
-  Perform Find
-  Sort Records [Orders::Date; ascending]
-
-Modern Equivalent:
-  GET /api/orders?status=Open,Pending&date_after=2024-01-01&sort=date&order=asc
-
-  // Backend
-  async function findOrders({ statuses, dateAfter, sort, order }) {
-    return db.query(
-      `SELECT * FROM orders
-       WHERE status = ANY($1)
-         AND order_date > $2
-       ORDER BY ${sort} ${order}`,
-      [statuses, dateAfter]
-    );
-  }
-```
-
-### Conditional Navigation with Dialog
-```
-FM Pattern:
-  Show Custom Dialog ["Confirm"; "Delete this record?"]
-  If [Get(LastMessageChoice) = 1]
-    Delete Record/Request
-    Go to Layout ["RecordList"]
-  End If
-
-Modern Equivalent:
-  // Frontend
-  async function handleDelete(recordId) {
-    const confirmed = await showConfirmDialog('Delete this record?');
-    if (confirmed) {
-      await api.delete(`/records/${recordId}`);
-      router.push('/records');
-    }
-  }
-```
-
-### Transaction Pattern (Set Error Capture + Commit)
-```
-FM Pattern:
-  Set Error Capture [On]
-  Set Field [Account::Balance; Account::Balance - $amount]
-  Set Field [Transaction::Amount; $amount]
-  Commit Records/Requests
-  If [Get(LastError) ≠ 0]
-    Revert Record/Request
-    Show Custom Dialog ["Error"; "Transaction failed"]
-  End If
-
-Modern Equivalent:
-  async function processTransaction(accountId, amount) {
-    const client = await db.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(
-        'UPDATE accounts SET balance = balance - $1 WHERE id = $2',
-        [amount, accountId]
-      );
-      await client.query(
-        'INSERT INTO transactions (account_id, amount) VALUES ($1, $2)',
-        [accountId, amount]
-      );
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw new Error('Transaction failed');
-    } finally {
-      client.release();
-    }
-  }
-```
-
-## Script Categorization Guide
-
-When analyzing scripts for the business logic mapping, categorize each script or script group:
-
-### Drop
-Scripts that only do navigation or UI manipulation that the new framework handles automatically:
-- Go to Layout (routing)
-- Go to Record First/Last/Next/Previous (pagination)
-- Freeze/Refresh Window (loading states)
-- Show/Hide toolbars
-- Close Window
-- Scripts with only navigation steps
-
-### API Endpoint
-Scripts that perform data operations triggered by user action:
-- Create/Update/Delete record workflows
-- Search/filter operations
-- Export operations
-- Any script called by a button that changes data
-
-### Service Function
-Backend logic that enforces rules or performs background work:
-- Validation scripts
-- Calculation/aggregation scripts
-- Email sending
-- Scheduled operations
-- Data synchronization
-- Any script called by "Perform Script on Server"
-
-### UI Handler
-Client-side logic for form behavior and user interaction:
-- Form field validation before submit
-- Conditional field visibility
-- Auto-fill based on selection
-- Dialog/modal flows
-- Any script attached to a script trigger (OnObjectEnter, OnObjectModify, etc.)
+For high-risk translations, create semantic fixtures covering normal, empty/null, boundary, unauthorized, duplicate, found-set, error, and retry cases. Compare results to the source application or raw authored logic. Counts and successful compilation cannot detect a changed predicate or deleted operand.
