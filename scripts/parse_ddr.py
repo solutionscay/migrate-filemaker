@@ -30,6 +30,88 @@ import sys
 _C0_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
+# ─── SECRET REDACTION ────────────────────────────────────────────────────────
+#
+# WHY THIS EXISTS. FileMaker solutions routinely hardcode credentials into script
+# steps: SMTP passwords, S3 access keys, third-party API keys, and the passwords
+# used by Create Account / Change Password steps. They are in the DDR because they
+# are in the solution.
+#
+# The asymmetry that makes this the parser's problem: projects gitignore the raw
+# DDR XML (it is huge, and it is full of this) but COMMIT the parsed specs. So the
+# parser is the boundary between "secret stays on the analyst's disk" and "secret
+# is in git history forever".
+#
+# This mattered silently for a while: the parser's own bugs were acting as an
+# accidental redactor. Calculations came out with their operands deleted and
+# StepText was never read, so most literals never reached the JSON. Fixing those
+# bugs removed the accident. Hence a deliberate redactor.
+#
+# Deliberately conservative. It only fires on a quoted literal that FOLLOWS a
+# credential-ish keyword, so it cannot touch:
+#   - field references (Table::field) or variables ($x, $$y) -- they are unquoted
+#   - a quoted string that merely CONTAINS such a word (Status = "Token")
+# "secret" excludes "secretary" -- Secretary_global is a real field name in this
+# domain and matching it was a false positive that badly inflated a first estimate.
+_SECRET_KEYWORD = r"(?:password|passwd|pwd|api[ _]?key|access[ _]?key|secret(?!ary)|token|credential)"
+_SECRET_RE = re.compile(
+    r'(' + _SECRET_KEYWORD + r'[^"\n]{0,40}")([^"]{4,})(")',
+    re.I,
+)
+
+REDACTION_PLACEHOLDER = "<REDACTED>"
+_redaction_count = 0
+
+
+_QUOTED_RE = re.compile(r'"([^"]{4,})"')
+_SECRET_NAME_RE = re.compile(_SECRET_KEYWORD, re.I)
+
+
+def redact_secrets(text):
+    """Mask hardcoded credential literals, preserving the surrounding structure.
+
+    Structure is kept deliberately: an analyst still needs to see THAT a step sets
+    an SMTP password, and where, in order to plan the migration. They just do not
+    need the value in git.
+    """
+    global _redaction_count
+    if not text or '"' not in text:
+        return text
+
+    def sub(m):
+        global _redaction_count
+        _redaction_count += 1
+        return m.group(1) + REDACTION_PLACEHOLDER + m.group(3)
+
+    return _SECRET_RE.sub(sub, text)
+
+
+def redact_all_literals(text):
+    """Mask EVERY quoted literal in `text`.
+
+    For when the surrounding context has already established that the payload is a
+    secret, so the value carries no give-away keyword of its own -- e.g.
+        Set Variable [ $password ; Value: "hunter2" ]
+    where the <Value> element is just "hunter2". Keyword-adjacency cannot see that;
+    the variable NAME is the only signal.
+    """
+    global _redaction_count
+    if not text or '"' not in text:
+        return text
+
+    def sub(m):
+        global _redaction_count
+        _redaction_count += 1
+        return f'"{REDACTION_PLACEHOLDER}"'
+
+    return _QUOTED_RE.sub(sub, text)
+
+
+def looks_like_secret_target(*names):
+    """True if any of these variable/field names names a credential."""
+    return any(n and _SECRET_NAME_RE.search(str(n)) for n in names)
+
+
 def parse_xml(path):
     """Parse a DDR XML file, tolerating FileMaker's invalid control characters.
 
@@ -211,7 +293,7 @@ def parse_script_steps(step_list):
         # Keep the faithful rendering alongside whatever we can structure.
         step_text = step.findtext("StepText")
         if step_text and step_text.strip():
-            s["step_text"] = step_text.strip()
+            s["step_text"] = redact_secrets(step_text.strip())
 
         # Collect relevant parameters
         params = {}
@@ -244,7 +326,7 @@ def parse_script_steps(step_list):
         # Calculation
         step_calc = get_calculation(step)
         if step_calc:
-            params["calculation"] = step_calc
+            params["calculation"] = redact_secrets(step_calc)
 
         # Name (for variables etc.)
         name_el = step.find("Name")
@@ -256,13 +338,26 @@ def parse_script_steps(step_list):
         if val is not None:
             text = val.find("Text")
             if text is not None and text.text:
-                params["value"] = text.text.strip()
+                params["value"] = redact_secrets(text.text.strip())
 
         # Boolean conditions
         for tag in ["Select", "Restore", "NoInteract"]:
             el = step.find(tag)
             if el is not None and el.get("state") == "True":
                 params[tag.lower()] = True
+
+        # A credential-ish TARGET means the payload is the secret even though the
+        # payload itself carries no keyword:
+        #     Set Variable [ $password ; Value: "hunter2" ]
+        # Here <Value> is just "hunter2" -- keyword-adjacency cannot see it, and
+        # the variable name is the only signal. Same for Set Field into a
+        # Users::Password column.
+        if looks_like_secret_target(params.get("variable"), params.get("field")):
+            for key in ("value", "calculation"):
+                if params.get(key):
+                    params[key] = redact_all_literals(params[key])
+            if s.get("step_text"):
+                s["step_text"] = redact_all_literals(s["step_text"])
 
         if params:
             s["params"] = params
@@ -977,6 +1072,13 @@ class DDRFile:
                         rec["tables"] = tables
                     p["records"] = rec
 
+                # Real shape (verified, gold Schema — 236 grants):
+                #   <LayoutList>
+                #     <Layout id="1" name="Intakes">      <- the NAME lives here
+                #       <LayoutAccess value="NoAccess"/>  <- access is a CHILD
+                #       <DataAccess   value="NoAccess"/>  <- and DataAccess is its SIBLING
+                # Reading LayoutList/LayoutAccess directly finds nothing: same wrapper trap
+                # as ConditionalFormatting's <Item>. It silently dropped all 236 grants.
                 layouts = ps.find("Layouts")
                 if layouts is not None:
                     lay = {
@@ -984,35 +1086,31 @@ class DDRFile:
                         "allow_creation": layouts.get("allowCreation", ""),
                     }
                     items = [
-                        {"layout": la.get("name", ""),
-                         "access": la.get("value", ""),
-                         "data_access": _value(la, "DataAccess")}
-                        for la in layouts.findall("LayoutList/LayoutAccess")
+                        {"layout": el.get("name", ""),
+                         "id": el.get("id", ""),
+                         "access": _value(el, "LayoutAccess"),
+                         "data_access": _value(el, "DataAccess")}
+                        for el in layouts.findall("LayoutList/Layout")
                     ]
                     if items:
                         lay["items"] = items
                     p["layouts"] = lay
 
-                scripts_el = ps.find("Scripts")
-                if scripts_el is not None:
-                    scr = {
-                        "value": scripts_el.get("value", ""),
-                        "allow_creation": scripts_el.get("allowCreation", ""),
-                    }
-                    items = [
-                        {"script": sa.get("name", ""), "access": sa.get("value", "")}
-                        for sa in scripts_el.findall("ScriptList/ScriptAccess")
-                    ]
-                    if items:
-                        scr["items"] = items
-                    p["scripts"] = scr
-
-                value_lists = ps.find("ValueLists")
-                if value_lists is not None:
-                    p["value_lists"] = {
-                        "value": value_lists.get("value", ""),
-                        "allow_creation": value_lists.get("allowCreation", ""),
-                    }
+                # Scripts / ValueLists carry only a coarse grant here. Measured across all
+                # 13 offices: Scripts is ExecutableOnly/Modifiable/NoAccess (199 sets) and
+                # ValueLists is Modifiable/ViewOnly/NoAccess (199 sets). NEITHER is ever
+                # "Custom", so no per-item list is ever emitted and its shape is unobserved.
+                # Deliberately not guessing at one -- encoding an unverified shape is the
+                # exact mistake that produced every defect this parser was audited for.
+                # If a future export shows Custom here, verify the real nesting against the
+                # XML first (Layouts above is the likely template: List > Item > Access).
+                for tag, key in (("Scripts", "scripts"), ("ValueLists", "value_lists")):
+                    el = ps.find(tag)
+                    if el is not None:
+                        p[key] = {
+                            "value": el.get("value", ""),
+                            "allow_creation": el.get("allowCreation", ""),
+                        }
 
                 self._inject_source(p)
                 privileges.append(p)
@@ -1459,6 +1557,15 @@ if __name__ == "__main__":
 
     # Summary
     print(f"\nDone. All specs written to {output_dir}/")
+
+    import parse_ddr as _self  # noqa: PLC0415 -- read the live counter
+    if _self._redaction_count:
+        print(f"\n  Redacted {_self._redaction_count} hardcoded credential literal(s) "
+              f"from script steps.")
+        print(f"  Structure is preserved; values are replaced with "
+              f"{REDACTION_PLACEHOLDER}.")
+        print(f"  The real values remain in the raw DDR XML, which should stay "
+              f"gitignored.")
 
     if multi_file:
         print(f"\n  Multi-file solution ({len(ddr_files)} files):")
