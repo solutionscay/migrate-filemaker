@@ -1558,9 +1558,12 @@ if __name__ == "__main__":
     # Summary
     print(f"\nDone. All specs written to {output_dir}/")
 
-    import parse_ddr as _self  # noqa: PLC0415 -- read the live counter
-    if _self._redaction_count:
-        print(f"\n  Redacted {_self._redaction_count} hardcoded credential literal(s) "
+    # NOTE: do NOT `import parse_ddr` here to read the counter. Run as a script
+    # this module is __main__, so that import loads a SECOND copy whose counter is
+    # always 0 -- the summary silently never printed. _redaction_count is already
+    # this module's global; read it directly.
+    if _redaction_count:
+        print(f"\n  Redacted {_redaction_count} hardcoded credential literal(s) "
               f"from script steps.")
         print(f"  Structure is preserved; values are replaced with "
               f"{REDACTION_PLACEHOLDER}.")
