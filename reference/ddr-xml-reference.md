@@ -109,9 +109,9 @@ Path: `File > BaseTableCatalog > BaseTable`
       <Comment/>
       <AutoEnter allowEditing="True" value="CreationName" constant="False" ...>
         <Serial increment="1" nextValue="430" generate="OnCreation"/>
-        <Calculation>
-          <Text>...formula...</Text>
-        </Calculation>
+        <!-- Direct text. <Calculation> NEVER has a <Text> child (0 / 36,051
+             measured). Read .text. See "Calculation Text Extraction". -->
+        <Calculation>Get ( UUID )</Calculation>
         <ConstantData/>
       </AutoEnter>
       <Validation message="False" ... type="OnlyDuringDataEntry">
@@ -133,7 +133,7 @@ Path: `File > BaseTableCatalog > BaseTable`
 ### AutoEnter
 - `value` attribute: CreationName, CreationDate, CreationTime, ModificationName, ModificationDate, ModificationTime
 - `<Serial>`: auto-increment with `nextValue`, `increment`, `generate` (OnCreation/OnCommit)
-- `<Calculation><Text>`: auto-enter calculation formula
+- `<Calculation>`: auto-enter calculation formula, as **direct text** — never a `<Text>` child (0 / 36,051 measured). See "Calculation Text Extraction".
 
 ### Storage
 - `global="True"`: app-level variable, not per-record
@@ -245,7 +245,7 @@ Prefer `DDRInfo > Field` (structured). Fall back to `Name` text (format: `Table:
 
 Buttons come in **four** flavours. Handling only `GroupButtonObj` misses the
 majority of real bindings — measured on one solution: 872 of 1,536 distinct
-button actions lost (57%), and 112 layouts reporting no buttons while genuinely
+button actions lost (57%), and 83 layouts reporting no buttons while genuinely
 having them.
 
 | Element | Notes |
@@ -304,7 +304,7 @@ Layout objects can have conditional formatting rules that change visual appearan
 - The attribute is **`op`**, not `type`.
 - **`<Format>` is a sibling of `<Condition>`**, both under `<Item>` — not a child of Condition.
 - Formatting is **CSS** at `Format > Styles > LocalCSS`, not discrete `FillColor` / `TextColor` elements.
-- `Item@flags` (observed `3`, `5`) encodes rule state.
+- `Item@flags` is a **bitfield**, not an enum — 14 distinct values occur in gold. Do not match on specific values; decode the bits.
 - Formula lives in `<Calculation>` — see "Calculation Text Extraction".
 - Business logic is frequently embedded here: financial thresholds, status pipelines, urgency countdowns.
 
@@ -316,9 +316,19 @@ Any layout object can have a visibility condition — a formula that hides the o
 <Object type="Field" name="price_column" ...>
   <FieldObj ...>...</FieldObj>
   <HideCondition>
-    <Calculation>
-      <Text>$$USER_privgroup ≠ "[Full Access]"</Text>
-    </Calculation>
+    <!-- Direct text; no <Text> child (0 / 1,229 HideCondition calcs measured).
+         Note the FieldRef operand: reading DisplayCalculation chunk .text only
+         would delete "Case_Notes::log_created_account" and leave a bare
+         "Get ( AccountName ) ≠", which reads as a hardcoded-account rule and
+         means the opposite. See "Calculation Text Extraction". -->
+    <Calculation>Get ( AccountName ) ≠ Case_Notes::log_created_account</Calculation>
+    <DisplayCalculation>
+      <Chunk type="FunctionRef">Get</Chunk>
+      <Chunk type="NoRef"> ( </Chunk>
+      <Chunk type="FunctionRef">AccountName</Chunk>
+      <Chunk type="NoRef"> ) ≠ </Chunk>
+      <Chunk type="FieldRef"><Field table="Case_Notes" id="4" name="log_created_account"/></Chunk>
+    </DisplayCalculation>
   </HideCondition>
 </Object>
 ```
@@ -359,10 +369,10 @@ also appear at the root of `ScriptCatalog`, outside any group.**
   <Script id="14" name="AddSaleProduct" ...>
     <StepList>
       <Step id="141" name="Set Variable" enable="True">
+        <StepText>Set Variable [ $variable ; Value: Products::Price * 2 ]</StepText>
         <Name>$variable</Name>
-        <Calculation>
-          <Text>...expression...</Text>
-        </Calculation>
+        <!-- Direct text; no <Text> child (0 / 11,989 step calcs measured). -->
+        <Calculation>Products::Price * 2</Calculation>
       </Step>
       <Step id="1" name="Perform Script" enable="True">
         <Script id="..." name="OtherScript"/>
@@ -379,7 +389,8 @@ also appear at the root of `ScriptCatalog`, outside any group.**
 - `<Script name="...">`: called script (Perform Script step)
 - `<Layout name="...">`: target layout (Go to Layout step)
 - `<Field>` / `<FieldRef>`: target field (Set Field step)
-- `<Calculation><Text>`: expression/formula
+- `<Calculation>`: expression/formula, as **direct text** — never a `<Text>` child. See "Calculation Text Extraction".
+- `<StepText>`: FileMaker's own fully-rendered form of the step (`Set Field [ Intakes::is_Closed; 1 ]`). The structured children below are an allow-list of ~10 tags out of ~102 that actually occur, so **62% of steps carry no structured params at all** — dialog text, find queries, sort orders and return values live only here. Capture it.
 - `<Name>`: variable name (Set Variable step)
 - `<CurrentScript value="Pause|Resume|Exit">`: flow control
 
@@ -495,7 +506,9 @@ Key points:
 
 Path: `File > CustomFunctionCatalog > CustomFunction`
 Attributes: `name`, `parameters` (semicolon-separated)
-Contains calculation via `<Calculation><Text>` or `<DisplayCalculation><Chunk>` (see "Calculation Text Extraction" above).
+Contains the body in `<Calculation>` as **direct text** — never a `<Text>` child (0 / 174 custom-function calcs measured). `<DisplayCalculation>` is a *sibling*, and is a chunked rendering, not a fallback of equal fidelity. See "Calculation Text Extraction".
+
+Custom functions take **parameters, not field references**: only 9 of 174 contain a `FieldRef` chunk, so this is the surface least affected by the chunk-join trap. Heuristic scanners over-report damage here because embedded licence/author comments (`// by Matt Navarre 1/7/08`) look like mangled formulas.
 
 ## External Data Sources
 
