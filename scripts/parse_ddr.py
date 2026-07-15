@@ -43,6 +43,11 @@ def parse_xml(path):
     if n:
         print(f"  WARNING: stripped {n} invalid control char(s) from {os.path.basename(path)}",
               file=sys.stderr)
+    # Some exports carry a stray newline before the XML declaration, which expat
+    # rejects with "XML or text declaration not at start of entity". Same class
+    # of FileMaker malformation as the control chars above -- tolerate it, so the
+    # warning channel stays meaningful rather than crying wolf on every run.
+    cleaned = cleaned.lstrip("﻿ \t\r\n")
     return ET.ElementTree(ET.fromstring(cleaned))
 
 
