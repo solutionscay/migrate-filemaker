@@ -135,6 +135,45 @@ def parse_xml(path):
 
 # ─── HELPERS (module-level, take explicit params) ────────────────────────────
 
+# A path entry starts with a scheme: file:, fmnet:, filemac:, filewin:, ...
+_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*:")
+# Several entries on one line are split only before a scheme, because file
+# names may contain spaces ("file:Ledger Data fmnet:/host/Ledger Data").
+_PATH_SPLIT_RE = re.compile(r"[\r\n]+|\s+(?=[A-Za-z][A-Za-z0-9]*:)")
+_FM_EXTENSIONS = (".fmp12", ".fp7", ".fp5", ".fp3")
+
+
+def reference_paths(fr):
+    """The paths of a <FileReference>, in the order FileMaker tries them.
+
+    Real DDRs use three shapes for the same reference:
+      - ExternalDataSourcesCatalog: a `pathList="file:Data"` ATTRIBUTE
+        (FileMaker 22: every catalog entry; no PathList child ever seen);
+      - <PathList><Path>file:Data</Path></PathList> children (older docs);
+      - a value list from another file: a <UniversalPathList> child's text.
+    """
+    raw = []
+    if fr.get("pathList"):
+        raw.append(fr.get("pathList"))
+    pl = fr.find("PathList")
+    if pl is not None:
+        raw.extend(p.text for p in pl.findall("Path") if p.text)
+    upl = fr.findtext("UniversalPathList")
+    if upl:
+        raw.append(upl)
+    paths = []
+    for chunk in raw:
+        paths.extend(p.strip() for p in _PATH_SPLIT_RE.split(chunk) if p and p.strip())
+    return paths
+
+
+def path_target(path):
+    """The file a path entry points at: 'fmnet:/host/Data.fmp12' -> 'Data'."""
+    p = _SCHEME_RE.sub("", path.strip()).replace("\\", "/").rstrip("/")
+    p = p.rsplit("/", 1)[-1]
+    base, ext = os.path.splitext(p)
+    return base if ext.lower() in _FM_EXTENSIONS else p
+
 def get_calculation(parent):
     """Extract calculation text from a parent element.
 
@@ -298,10 +337,13 @@ def parse_script_steps(step_list):
         # Collect relevant parameters
         params = {}
 
-        # Script reference (Perform Script)
+        # Script reference (Perform Script). FileMaker allows duplicate script
+        # names, and some references carry an id and no name, so keep the id.
         sr = step.find("Script")
         if sr is not None:
             params["script"] = sr.get("name", "")
+            if sr.get("id"):
+                params["script_id"] = sr.get("id")
 
         # FileReference in Perform Script steps (cross-file call)
         fr_ref = step.find("FileReference")
@@ -543,16 +585,19 @@ class DDRFile:
 
     def _extract_ui_logic(self):
         """Extract conditional formatting and hide-object-when from parsed layouts."""
+        # Layout names can repeat within a file; the id tells the layouts apart.
         for layout in self.layouts:
             layout_name = layout.get("name", "")
             for cf in layout.get("conditional_formatting", []):
                 entry = dict(cf)
                 entry["layout"] = layout_name
+                entry["layout_id"] = layout.get("id")
                 self._inject_source(entry)
                 self.conditional_formatting.append(entry)
             for hc in layout.get("hide_conditions", []):
                 entry = dict(hc)
                 entry["layout"] = layout_name
+                entry["layout_id"] = layout.get("id")
                 self._inject_source(entry)
                 self.hide_conditions.append(entry)
 
@@ -820,6 +865,13 @@ class DDRFile:
                     script_ref = step.find("Script")
                     if script_ref is not None:
                         b["script"] = script_ref.get("name", "")
+                        if script_ref.get("id"):
+                            b["script_id"] = script_ref.get("id")
+                    # Same shape as a script step: a FileReference sibling of
+                    # <Script> means the button calls a script in another file.
+                    file_ref = step.find("FileReference")
+                    if file_ref is not None:
+                        b["external_file"] = file_ref.get("name", "")
                     step_text = step.find("StepText")
                     if step_text is not None and step_text.text:
                         b["description"] = step_text.text.strip()
@@ -840,14 +892,16 @@ class DDRFile:
                 seen.add(key)
                 unique_fields.append(f)
 
-        # Deduplicate buttons on (action, script). Keying on script alone
-        # collapses distinct actions that call no script -- and `.get("script",
-        # default)` returns "" rather than the default when the key exists but
-        # is empty, so scriptless buttons all collided on "".
+        # Deduplicate buttons on (action, script, script id, file). Keying on
+        # script alone collapses distinct actions that call no script -- and
+        # `.get("script", default)` returns "" rather than the default when the
+        # key exists but is empty, so scriptless buttons all collided on "".
+        # The id and the file keep same-named scripts apart.
         seen_btns = set()
         unique_buttons = []
         for b in buttons:
-            key = (b.get("action", ""), b.get("script", ""))
+            key = (b.get("action", ""), b.get("script", ""), b.get("script_id", ""),
+                   b.get("external_file", ""))
             if key[0] and key not in seen_btns:
                 seen_btns.add(key)
                 unique_buttons.append(b)
@@ -990,6 +1044,32 @@ class DDRFile:
                     rel_table = sr.find("Table")
                     if rel_table is not None:
                         v["show_related_from"] = rel_table.get("name", "")
+
+            elif source_type == "External":
+                # The values of a value list in another file. Real shape
+                # (FileMaker 22):
+                #   <Source value="External"/>
+                #   <External>
+                #     <FileReference id name><UniversalPathList>file:…</UniversalPathList></FileReference>
+                #     <ValueList id name/>   <- the list in the other file
+                #   </External>
+                v["type"] = "external"
+                ext = vl.find("External")
+                fr = ext.find("FileReference") if ext is not None else None
+                if fr is not None:
+                    v["external_file_reference"] = {"name": fr.get("name", ""), "id": fr.get("id", "")}
+                    paths = reference_paths(fr)
+                    if paths:
+                        v["external_paths"] = paths
+                inner = ext.find("ValueList") if ext is not None else None
+                if inner is not None:
+                    v["external_value_list"] = {"id": inner.get("id"), "name": inner.get("name")}
+
+            else:
+                # Never emit a bare list silently: keep the source type, and say so.
+                v["type"] = source_type.lower() if source_type else "unknown"
+                print(f"  WARNING: value list '{v['name']}' has an unsupported source "
+                      f"'{source_type or '(none)'}'", file=sys.stderr)
 
             self._inject_source(v)
             vlists.append(v)
@@ -1158,14 +1238,9 @@ class DDRFile:
                 "id": fr.get("id", ""),
                 "name": fr.get("name", ""),
             }
-            path_list = fr.find("PathList")
-            if path_list is not None:
-                paths = []
-                for p in path_list.findall("Path"):
-                    if p.text:
-                        paths.append(p.text.strip())
-                if paths:
-                    entry["paths"] = paths
+            paths = reference_paths(fr)
+            if paths:
+                entry["paths"] = paths
             self._inject_source(entry)
             sources.append(entry)
 
@@ -1185,58 +1260,99 @@ class DDRFile:
 
 # ─── DDRMerger CLASS ─────────────────────────────────────────────────────────
 
+def check_unique_source_files(ddr_files):
+    """Refuse two inputs with the same File name.
+
+    source_file comes from the DDR's own <File name>. Two exports of one file
+    in the same folder (an old export kept under another file name) gave every
+    (source_file, id) pair twice, merged their privilege sets and exited 0
+    with output that looked normal.
+    """
+    by_name = {}
+    for ddr in ddr_files:
+        by_name.setdefault(ddr.source_file, []).append(getattr(ddr, "filepath", "?"))
+    dups = {name: paths for name, paths in by_name.items() if len(paths) > 1}
+    if dups:
+        lines = [f"  {name}: " + ", ".join(paths) for name, paths in sorted(dups.items())]
+        raise ValueError("two or more inputs have the same File name; keep one export of each file:\n"
+                         + "\n".join(lines))
+
 class DDRMerger:
     """Merges parsed data from multiple DDRFile objects into unified specs."""
 
     def __init__(self, ddr_files):
+        check_unique_source_files(ddr_files)
         self.files = ddr_files
         self.multi_file = len(ddr_files) > 1
+        # Sorted, so that nothing below depends on set order (PYTHONHASHSEED).
+        self._known_files = sorted(f.source_file for f in ddr_files)
+        # (from_file, reference) -> candidates, for references that match more
+        # than one parsed file. They stay unresolved instead of picking one.
+        self.ambiguous = {}
 
-        # Build EDS map: symbolic name → source file name that defines it
+        # Build EDS map: (file, data source name) → (parsed file or None, how)
         # Used to resolve external file references
         self._eds_map = self._build_eds_map()
 
-    def _build_eds_map(self):
-        """Map external data source names to actual parsed file names."""
-        eds_map = {}
-        known_files = {f.source_file for f in self.files}
+    def _match_file(self, target):
+        """The parsed files whose name is `target`: exact, else case-insensitive
+        and without extension. Sorted; more than one means ambiguous."""
+        if target in self._known_files:
+            return [target]
+        t = target.lower()
+        return [kf for kf in self._known_files
+                if kf.lower() == t or os.path.splitext(kf)[0].lower() == t]
 
+    def _pick(self, source_file, ref_name, candidates):
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            self.ambiguous[(source_file, ref_name)] = candidates
+        return None
+
+    def _resolve_paths(self, source_file, ref_name, paths):
+        """Resolve through the reference's own paths, in FileMaker's order.
+        Returns (file or None, how): how is "path", or "name" when the
+        reference has no path and only its name could be matched."""
+        if paths:
+            for p in paths:
+                candidates = self._match_file(path_target(p))
+                if candidates:
+                    return self._pick(source_file, ref_name, candidates), "path"
+            return None, "path"
+        return self._pick(source_file, ref_name, self._match_file(ref_name)), "name"
+
+    def _build_eds_map(self):
+        """Map external data sources to parsed files through their pathList.
+
+        The data source NAME is an alias chosen by the developer; it is not a
+        file name. A source named "Backend" that points at "file:Data" resolves
+        to Data.fmp12, and a source named "Data" that points at "file:Archive"
+        must not resolve to Data.fmp12. The name is used only when there is no
+        path, and the output says so (resolved_by: "name").
+        """
+        eds_map = {}
         for ddr in self.files:
             for eds in ddr.external_data_sources:
                 if eds["type"] == "filemaker":
-                    eds_name = eds["name"]
-                    # Try to match to a known parsed file
-                    if eds_name in known_files:
-                        eds_map[(ddr.source_file, eds_name)] = eds_name
-                    else:
-                        # Try matching without extension
-                        for kf in known_files:
-                            kf_base = os.path.splitext(kf)[0]
-                            if eds_name == kf_base or eds_name.lower() == kf_base.lower():
-                                eds_map[(ddr.source_file, eds_name)] = kf
-                                break
+                    resolved, how = self._resolve_paths(
+                        ddr.source_file, eds["name"], eds.get("paths", []))
+                    eds_map[(ddr.source_file, eds["name"])] = resolved
+                    eds["resolved_source_file"] = resolved
+                    eds["resolved_by"] = how
         return eds_map
 
-    def _resolve_external_ref(self, source_file, ref_name):
-        """Try to resolve an external file reference name to a known file."""
-        known_files = {f.source_file for f in self.files}
+    def _resolve_external_ref(self, source_file, ref_name, paths=None):
+        """Resolve a reference by data-source name to a parsed file, or None.
 
-        # Direct match
-        if ref_name in known_files:
-            return ref_name
-
-        # Via EDS map
-        resolved = self._eds_map.get((source_file, ref_name))
-        if resolved:
-            return resolved
-
-        # Case-insensitive / extensionless match
-        for kf in known_files:
-            kf_base = os.path.splitext(kf)[0]
-            if ref_name == kf_base or ref_name.lower() == kf_base.lower():
-                return kf
-
-        return None  # Unresolved
+        A reference that names a data source of its own file goes through that
+        data source's path. `paths` serves a reference that carries its own
+        path (a value list from another file). A name that is no data source
+        falls back to name matching.
+        """
+        if (source_file, ref_name) in self._eds_map:
+            return self._eds_map[(source_file, ref_name)]
+        return self._resolve_paths(source_file, ref_name, paths or [])[0]
 
     def merge_topology(self):
         """Produce the 00_topology.json with file inventory and cross-file refs."""
@@ -1244,8 +1360,6 @@ class DDRMerger:
         cross_file_tos = []
         cross_file_scripts = []
         unresolved_refs = []
-
-        known_files = {f.source_file for f in self.files}
 
         for ddr in self.files:
             info = {
@@ -1288,18 +1402,24 @@ class DDRMerger:
                             "context": f"TO '{to['name']}' references file '{ref_name}'",
                         })
 
-            # Track cross-file script calls
+            # Track cross-file script calls. step_line is the step's 1-based
+            # position, the line number Script Workspace shows. A step's own
+            # `id` is its step TYPE (1 = Perform Script), not an identity.
             for script in ddr.scripts:
-                for step in script.get("steps", []):
+                for line, step in enumerate(script.get("steps", []), start=1):
                     params = step.get("params", {})
                     if "external_file" in params:
                         ext_file = params["external_file"]
                         resolved = self._resolve_external_ref(ddr.source_file, ext_file)
                         entry = {
+                            "via": "script_step",
                             "from_file": ddr.source_file,
                             "script": script["name"],
+                            "script_id": script.get("id"),
                             "step": step.get("name"),
+                            "step_line": line,
                             "calls_script": params.get("script", ""),
+                            "calls_script_id": params.get("script_id"),
                             "external_ref": ext_file,
                             "resolved_to": resolved,
                         }
@@ -1312,12 +1432,43 @@ class DDRMerger:
                                 "context": f"Script '{script['name']}' calls script in file '{ext_file}'",
                             })
 
+            # Buttons call scripts in other files too; they were never scanned.
+            # Like script steps, any action with a FileReference is listed
+            # (Open File too, with calls_script ""). Buttons are the layout's
+            # deduplicated list: one entry per distinct action on a layout.
+            for layout in ddr.layouts:
+                for b in layout.get("buttons", []):
+                    if "external_file" not in b:
+                        continue
+                    ext_file = b["external_file"]
+                    resolved = self._resolve_external_ref(ddr.source_file, ext_file)
+                    cross_file_scripts.append({
+                        "via": "button",
+                        "from_file": ddr.source_file,
+                        "layout": layout.get("name"),
+                        "layout_id": layout.get("id"),
+                        "button_type": b.get("button_type"),
+                        "step": b.get("action"),
+                        "calls_script": b.get("script", ""),
+                        "calls_script_id": b.get("script_id"),
+                        "external_ref": ext_file,
+                        "resolved_to": resolved,
+                    })
+                    if resolved is None:
+                        unresolved_refs.append({
+                            "type": "script_call",
+                            "from_file": ddr.source_file,
+                            "reference": ext_file,
+                            "context": f"A {b.get('action')} button on layout '{layout.get('name')}' "
+                                       f"references file '{ext_file}'",
+                        })
+
             # Check EDS references to files not in our set
             for eds in ddr.external_data_sources:
                 if eds["type"] == "filemaker":
                     eds_name = eds["name"]
                     resolved = self._resolve_external_ref(ddr.source_file, eds_name)
-                    if resolved is None and eds_name not in known_files:
+                    if resolved is None:
                         unresolved_refs.append({
                             "type": "external_data_source",
                             "from_file": ddr.source_file,
@@ -1334,7 +1485,15 @@ class DDRMerger:
                 "script_calls": cross_file_scripts,
             },
             "unresolved_references": unresolved_refs,
+            "ambiguous_references": [
+                {"from_file": f, "reference": r, "candidates": c}
+                for (f, r), c in sorted(self.ambiguous.items())
+            ],
         }
+
+        for (f, r), c in sorted(self.ambiguous.items()):
+            print(f"  WARNING: '{r}' in {f} matches more than one parsed file "
+                  f"({', '.join(c)}); left unresolved", file=sys.stderr)
 
         if unresolved_refs:
             print(f"\n  WARNING: {len(unresolved_refs)} unresolved cross-file reference(s):")
@@ -1351,15 +1510,24 @@ class DDRMerger:
         return merged
 
     def merge_table_occurrences(self):
-        """Concatenate TOs from all files, resolving external file references."""
+        """Concatenate TOs from all files, resolving external file references.
+
+        An external occurrence's base_table_id is an id in the OTHER file. It
+        is marked `external: true` and always carries `resolved_source_file`:
+        the target file, or null with `unresolved: true` when that file is not
+        in the parse. Never join it on its own source_file: a local table with
+        the same id is a different table.
+        """
         merged = []
         for ddr in self.files:
             for to in ddr.table_occurrences:
                 if "external_file_reference" in to:
                     ref_name = to["external_file_reference"]["name"]
                     resolved = self._resolve_external_ref(ddr.source_file, ref_name)
-                    if resolved:
-                        to["resolved_source_file"] = resolved
+                    to["external"] = True
+                    to["resolved_source_file"] = resolved
+                    if resolved is None:
+                        to["unresolved"] = True
                 merged.append(to)
         return merged
 
@@ -1385,9 +1553,29 @@ class DDRMerger:
         return merged
 
     def merge_value_lists(self):
+        """Concatenate value lists, resolving the file each one reads from.
+
+        - external lists get `resolved_source_file` (the file that holds the
+          list) through their data source, else their own path;
+        - field lists get `primary_table_source_file`: the file of the base
+          table behind `primary_table` (an occurrence name), so a consumer
+          need not go through the occurrence map. null when unresolved.
+        """
         merged = []
         for ddr in self.files:
-            merged.extend(ddr.value_lists)
+            tos = {to.get("name"): to for to in ddr.table_occurrences}
+            for v in ddr.value_lists:
+                if v.get("type") == "external" and "external_file_reference" in v:
+                    v["resolved_source_file"] = self._resolve_external_ref(
+                        ddr.source_file, v["external_file_reference"]["name"], v.get("external_paths"))
+                elif v.get("type") == "field" and v.get("primary_table"):
+                    to = tos.get(v["primary_table"])
+                    if to is not None and "external_file_reference" in to:
+                        v["primary_table_source_file"] = self._resolve_external_ref(
+                            ddr.source_file, to["external_file_reference"]["name"])
+                    elif to is not None:
+                        v["primary_table_source_file"] = ddr.source_file
+                merged.append(v)
         return merged
 
     # Access blocks are per-file: in a multi-file solution the UI file and the
@@ -1555,12 +1743,15 @@ if __name__ == "__main__":
         print(f"  - {rp}")
     print(f"Output: {output_dir}\n")
 
-    # Parse each file
-    ddr_files = []
-    for rp in report_paths:
-        ddr = DDRFile(rp)
+    # Read each file, refuse duplicate File names before the long parse, then parse
+    ddr_files = [DDRFile(rp) for rp in report_paths]
+    try:
+        check_unique_source_files(ddr_files)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(2)
+    for ddr in ddr_files:
         ddr.parse_all()
-        ddr_files.append(ddr)
 
     # Merge and write
     merger = DDRMerger(ddr_files)

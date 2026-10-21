@@ -134,11 +134,11 @@ EXPECTED_LAYOUTS = [
         "buttons": [
             # A plain ButtonObj -- ignored outright by the original parser.
             {"action": "Perform Script", "button_type": "ButtonObj",
-             "script": "Send Officer Dispositions",
+             "script": "Send Officer Dispositions", "script_id": "79",
              "description": "Perform Script [ “Send Officer Dispositions” ]"},
             # A GroupButtonObj container whose Step is one level deeper.
             {"action": "Perform Script", "button_type": "GroupButtonObj",
-             "script": "Set is_Closed from GJ Status",
+             "script": "Set is_Closed from GJ Status", "script_id": "1539",
              "description": "Perform Script [ “Set is_Closed from GJ Status” ]"},
         ],
         "source_file": SRC,
@@ -167,7 +167,7 @@ EXPECTED_SCRIPTS = [
         "steps": [
             {"id": "1", "name": "Perform Script", "enable": "True",
              "step_text": "Perform Script [ “Set User Information at Login” ]",
-             "params": {"script": "Set User Information at Login"}},
+             "params": {"script": "Set User Information at Login", "script_id": "794"}},
             # REDACTION: the keyword sits in the VARIABLE NAME, not in the value.
             # <Value> is bare ("hunter2-should-not-ship"), so keyword-adjacency
             # alone cannot see it -- looks_like_secret_target must catch it via
@@ -351,6 +351,7 @@ EXPECTED_CONDITIONAL_FORMATTING = [
         "formula": "Intakes::Juvenile_boolean",
         "format_css": "self:normal .self { color: rgba(85.098%,4.31373%,0%,1); }",
         "layout": "Intake Detail",
+        "layout_id": "11",
         "source_file": SRC,
     }
 ]
@@ -365,6 +366,7 @@ EXPECTED_HIDE_CONDITIONS = [
         # author-ownership check.
         "formula": "Get ( AccountName ) ≠ Case_Notes::log_created_account",
         "layout": "Intake Detail",
+        "layout_id": "11",
         "source_file": SRC,
     },
     {
@@ -373,6 +375,7 @@ EXPECTED_HIDE_CONDITIONS = [
         # Produced by the chunk-walker fallback, not by <Calculation> text.
         "formula": "IsEmpty ( LINE_ITEMS_Restitution::Balance_Due )",
         "layout": "Restitution Report",
+        "layout_id": "12",
         "source_file": SRC,
     },
 ]
