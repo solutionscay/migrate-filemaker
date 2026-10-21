@@ -553,7 +553,7 @@ This catalog lists references to other files or databases that the current FM fi
 - `id`: Internal FM identifier
 - `pathList`: An attribute (not a child element) that holds the targets FM tries, in order, when it opens the reference. Entries use a scheme prefix: `file:`, `fmnet:/`, `filemac:/`, `filewin:/`. The parser emits them as `paths`.
 
-Evidence: `tests/fixtures/mini_ddr.xml` carries the attribute shape with one entry. How a real DDR separates several entries inside the one attribute is not yet confirmed against a real multi-file DDR. The parser splits on line breaks, and on whitespace that is followed by a scheme prefix, so a file name with a space stays whole. Older versions of this doc showed `PathList > Path` children; the parser still reads them if present, but no real DDR has shown that shape.
+Evidence: 57 `FileReference` entries across 13 real multi-file DDR sets all use the attribute, and each holds exactly one entry. Shapes seen (placeholder names): `file:Name`, `file:Name Name`, `file:Name.ext`, `fmnet:/host/Name`, `fmnet:/1.2.3.4/Name Name Name`, `filewin:/C:/dir/dir/Name`, and `filemac:`-style paths with spaces in folder names. No real DDR has shown how several entries are separated inside the one attribute. The parser splits on line breaks, and on whitespace that is followed by a scheme prefix, so a name or folder with a space stays whole. Older versions of this doc showed `PathList > Path` children; the parser still reads them if present, but no real DDR has shown that shape.
 
 ### OdbcDataSource entries (external non-FM databases)
 

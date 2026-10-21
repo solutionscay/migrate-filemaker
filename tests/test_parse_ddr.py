@@ -791,6 +791,30 @@ class ExternalReferenceResolutionTest(unittest.TestCase):
             ["file:My Data", "fmnet:/*/My Data", "filemac:/HD/x/Data.fmp12"])
         self.assertEqual(parse_ddr.path_target_name("fmnet:/*/My Data"), "My Data")
 
+    def test_every_real_pathList_shape_splits_to_one_entry_and_the_right_name(self):
+        """Shapes seen in real multi-file DDRs, with placeholder names. Each
+        real pathList held a single entry."""
+        shapes = [
+            ("file:Name", "Name"),
+            ("file:Name Name", "Name Name"),
+            ("file:Name_9.fmp12", "Name_9.fmp12"),
+            ("fmnet:/host/Name", "Name"),
+            ("fmnet:/host.example.test/Name_Name", "Name_Name"),
+            ("fmnet:/1.2.3.4/Name", "Name"),
+            ("fmnet:/1.2.3.4/Name Name Name", "Name Name Name"),
+            ("filewin:/C:/dir/dir/dir/Name_Name", "Name_Name"),
+            ("filemac:/Disk Name/dir/dir/dir/Name", "Name"),
+        ]
+        for value, target in shapes:
+            with self.subTest(value=value):
+                self.assertEqual(parse_ddr.split_path_list(value), [value])
+                self.assertEqual(parse_ddr.path_target_name(value), target)
+
+    def test_multi_entry_pathList_keeps_spaced_names_and_drive_letters(self):
+        value = "file:Name Name\nfmnet:/1.2.3.4/Name Name filewin:/C:/dir name/Name"
+        self.assertEqual(parse_ddr.split_path_list(value),
+                         ["file:Name Name", "fmnet:/1.2.3.4/Name Name", "filewin:/C:/dir name/Name"])
+
     def test_alias_resolves_through_its_path(self):
         ui = _StubFile("UI.fmp12", [{"name": "Backend", "paths": ["file:Data"]}])
         m = parse_ddr.DDRMerger([ui, _StubFile("Data.fmp12")])
