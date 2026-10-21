@@ -268,8 +268,13 @@ having them.
 ```
 
 Search **nested** `<Step>` elements (`el.iter("Step")`) across all four tags, not
-just direct children. Dedup on `(action, script)` — keying on script name alone
-collapses distinct scriptless buttons together.
+just direct children. Each button records `script` and `script_id` from the
+`<Script>` child, `external_file` from a `<FileReference>` child (the script is
+in another file, exactly as for a Perform Script step), and `object_key` /
+`object_name` from the nearest enclosing `<Object>`. Dedup on
+`(action, script, script_id, external_file)` — keying on script name alone
+collapses distinct scriptless buttons together, and dropping the id or file
+merges same-named scripts.
 
 ### Conditional Formatting
 
@@ -405,7 +410,24 @@ Perform Script steps can call scripts in other files. This is indicated by a `<F
 </Step>
 ```
 
-The parser records the `FileReference` name as `external_file` in the step's `params`.
+The parser records the `FileReference` name as `external_file` and the
+`<Script>` `name` and `id` as `script` and `script_id` in the step's `params`.
+FileMaker allows duplicate script names, so resolve a call by target file plus
+`script_id`. The name alone is ambiguous.
+
+Each call with a `FileReference`, from a script step or a button, becomes a
+row in `00_topology.json` → `cross_file_references.script_calls`:
+
+| Key | Meaning |
+|---|---|
+| `origin` | `script_step` or `button` |
+| `from_file` | Calling file |
+| `script`, `script_id` | Calling script (`script_step` rows only) |
+| `step`, `step_id` | Calling step name, and its id inside the script (`step_id` on `script_step` rows only) |
+| `layout`, `layout_id`, `button_type`, `object_key`, `object_name` | Layout and button object that makes the call (`button` rows only; `object_name` is `null` when the object has no name) |
+| `calls_script`, `calls_script_id` | Target script name and id in the target file |
+| `external_ref` | `FileReference` name (External Data Source) |
+| `resolved_to` | Parsed file the reference resolves to, or `null` (also listed in `unresolved_references` with the same `origin`) |
 
 ## Value Lists
 
@@ -542,7 +564,7 @@ ODBC sources indicate the FM solution connects to an external SQL database. Thes
 
 ### Cross-file resolution
 
-Table occurrences (`external_file_reference`) and Perform Script steps (`external_file` param) name a data source, not a file. The merger resolves each data source of each file like this:
+Table occurrences (`external_file_reference`), Perform Script steps (`external_file` param) and button Perform Script calls (`external_file` on the button) name a data source, not a file. The merger resolves each data source of each file like this:
 
 1. Try each `paths` entry in order. Take the file name after the last `/` (`fmnet:/*/Data` → `Data`) and match it to a parsed file: exact file name, then the name without its FM extension, then the same case-insensitively. The first entry that matches wins (`resolved_via: "path"`, `matched_path`).
 2. Only when no path entry matches, match the data-source name the same way (`resolved_via: "name_fallback"`).
