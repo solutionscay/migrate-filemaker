@@ -912,6 +912,54 @@ class CrossFileScriptCallTest(unittest.TestCase):
         self.assertEqual((unresolved[0]["origin"], unresolved[0]["reference"]), ("button", "Gone"))
 
 
+class ValueListSourceTest(unittest.TestCase):
+    """Only Custom and Field sources were parsed; any other source came out as
+    a bare {id, name, source_file} (#7). UI.fmp12 has a Field list on an
+    external TO and two synthetic External lists, one into a file with no DDR.
+    No real DDR with an External source has been seen."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(cls.err):
+            files = []
+            for name in ("UI.xml", "Backend.xml"):
+                ddr = parse_ddr.DDRFile(os.path.join(TWO_FILE, name))
+                ddr.parse_all()
+                files.append(ddr)
+            merger = parse_ddr.DDRMerger(files)
+            cls.vlists = {v["name"]: v for v in merger.merge_value_lists()}
+            cls.topology = merger.merge_topology()
+
+    def test_unknown_source_is_typed_flagged_and_warned(self):
+        vl = self.vlists["Statuses"]
+        self.assertEqual((vl["type"], vl["unparsed"]), ("external", True))
+        self.assertEqual(vl["source"], {"attributes": {"value": "External"},
+                                        "children": ["FileReference"]})
+        self.assertIn("value list 'Statuses' has unsupported source 'External'",
+                      self.err.getvalue())
+
+    def test_external_file_is_kept_and_resolved(self):
+        vl = self.vlists["Statuses"]
+        self.assertEqual((vl["external_file"], vl["resolved_source_file"]),
+                         ("Backend", "Backend.fmp12"))
+        self.assertNotIn("unresolved", vl)
+
+    def test_unresolved_external_file_is_reported(self):
+        vl = self.vlists["Lost"]
+        self.assertEqual((vl["resolved_source_file"], vl["unresolved"]), (None, True))
+        refs = [r for r in self.topology["unresolved_references"] if r["type"] == "value_list"]
+        self.assertEqual([r["reference"] for r in refs], ["Gone"])
+
+    def test_field_list_resolves_base_tables_through_the_to_map(self):
+        vl = self.vlists["Items"]
+        self.assertEqual((vl["primary_table"], vl["primary_base_table"],
+                          vl["primary_base_table_file"]),
+                         ("Items_ext", "Items", "Backend.fmp12"))
+        self.assertEqual((vl["secondary_base_table"], vl["secondary_base_table_file"]),
+                         ("Prefs", "UI.fmp12"))
+
+
 
 class DuplicateSourceFileTests(unittest.TestCase):
     """Two inputs with one DDR `File name` would mix their ids. Stop instead."""

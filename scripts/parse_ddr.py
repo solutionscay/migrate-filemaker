@@ -1002,6 +1002,18 @@ class DDRFile:
 
             source = vl.find("Source")
             source_type = source.get("value", "") if source is not None else ""
+            # Never emit a bare list: `type` is always set, even for a source
+            # value this parser does not know.
+            v["type"] = source_type.lower() if source_type else "unknown"
+
+            # A list that takes its values from another file carries a
+            # <FileReference>, as a TO or Perform Script step does. The merger
+            # resolves it. The real DDRs seen so far hold only Custom and Field
+            # sources, so where FileMaker puts this element is unconfirmed:
+            # search the whole ValueList.
+            file_ref = next(vl.iter("FileReference"), None)
+            if file_ref is not None:
+                v["external_file"] = file_ref.get("name", "")
 
             if source_type == "Custom":
                 v["type"] = "custom"
@@ -1034,6 +1046,20 @@ class DDRFile:
                     rel_table = sr.find("Table")
                     if rel_table is not None:
                         v["show_related_from"] = rel_table.get("name", "")
+
+            else:
+                # Unseen source type (for example External, which takes the
+                # values of a value list in another file). Its XML shape is not
+                # known, so keep only structure -- attributes and element names,
+                # no text -- and flag the list for manual review.
+                v["unparsed"] = True
+                v["source"] = {
+                    "attributes": dict(source.attrib) if source is not None else {},
+                    "children": [c.tag for c in source] if source is not None else [],
+                }
+                v["elements"] = [c.tag for c in vl if c.tag != "Source"]
+                print(f"  WARNING: value list '{v['name']}' has unsupported source "
+                      f"'{source_type or '(none)'}'; emitted unparsed", file=sys.stderr)
 
             self._inject_source(v)
             vlists.append(v)
@@ -1466,6 +1492,18 @@ class DDRMerger:
                             "context": f"Button on layout '{layout.get('name')}' calls script in file '{ext_file}'",
                         })
 
+            for vl in ddr.value_lists:
+                if "external_file" not in vl:
+                    continue
+                ext_file = vl["external_file"]
+                if self._resolve_external_ref(ddr.source_file, ext_file) is None:
+                    unresolved_refs.append({
+                        "type": "value_list",
+                        "from_file": ddr.source_file,
+                        "reference": ext_file,
+                        "context": f"Value list '{vl['name']}' takes values from file '{ext_file}'",
+                    })
+
             # Check EDS references to files not in our set
             for eds in ddr.external_data_sources:
                 if eds["type"] == "filemaker":
@@ -1554,9 +1592,33 @@ class DDRMerger:
         return merged
 
     def merge_value_lists(self):
+        """Concatenate value lists. Resolve a list's external file reference,
+        and the base table behind a Field list's table occurrences."""
         merged = []
         for ddr in self.files:
-            merged.extend(ddr.value_lists)
+            tos = {to["name"]: to for to in ddr.table_occurrences}
+            for vl in ddr.value_lists:
+                vl = dict(vl)
+                if "external_file" in vl:
+                    info = self.resolve_external_ref_info(ddr.source_file, vl["external_file"])
+                    vl["resolved_source_file"] = info["resolved_to"]
+                    vl["resolved_via"] = info["resolved_via"]
+                    if info["resolved_to"] is None:
+                        vl["unresolved"] = True
+                    if info.get("ambiguous_candidates"):
+                        vl["ambiguous_candidates"] = info["ambiguous_candidates"]
+                for side in ("primary", "secondary"):
+                    to = tos.get(vl.get(f"{side}_table"))
+                    if to is None:
+                        continue
+                    vl[f"{side}_base_table"] = to.get("base_table")
+                    # An external TO's base table lives in the other file.
+                    if "external_file_reference" in to:
+                        vl[f"{side}_base_table_file"] = self._resolve_external_ref(
+                            ddr.source_file, to["external_file_reference"]["name"])
+                    else:
+                        vl[f"{side}_base_table_file"] = ddr.source_file
+                merged.append(vl)
         return merged
 
     # Access blocks are per-file: in a multi-file solution the UI file and the

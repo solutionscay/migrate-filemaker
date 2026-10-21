@@ -463,6 +463,35 @@ Check</Text>
 
 When `ShowRelated value="True"`, the list filters to records related through a specific table occurrence.
 
+`primary_table` and `secondary_table` are table occurrence names. In
+`06_value_lists.json` the merger adds `primary_base_table` and
+`primary_base_table_file` (and the `secondary_` pair) through the TO map. For an
+external TO, the base table file is the resolved other file, or `null` when the
+reference does not resolve.
+
+### Other sources
+
+Every value list has a `type`: the `<Source value>` in lower case (`custom`,
+`field`, or whatever else appears), or `unknown` when `<Source>` is missing.
+
+**Evidence:** the real multi-file DDRs checked so far hold only `Custom` and
+`Field` sources, and `<Source>` carries only the `value` attribute. A list that
+takes its values from another file (`Source value="External"` in the synthetic
+test) has not been seen in a real DDR. Its XML shape is unconfirmed.
+
+For any other source the parser:
+- sets `unparsed: true` and prints a warning;
+- keeps structure only: `source.attributes` (the `<Source>` attributes),
+  `source.children` (its child element names) and `elements` (the other child
+  element names of `<ValueList>`). No text content is kept;
+- records the name of a `<FileReference>` found anywhere under the
+  `<ValueList>` as `external_file`. The merger resolves it like a TO reference
+  (`resolved_source_file`, `resolved_via`, `unresolved`, `ambiguous_candidates`)
+  and lists an unresolved one in `00_topology.json` `unresolved_references` with
+  `type: value_list`.
+
+Check an `unparsed` list against the raw XML before you migrate it.
+
 ## Security
 
 ### Accounts
@@ -564,7 +593,7 @@ ODBC sources indicate the FM solution connects to an external SQL database. Thes
 
 ### Cross-file resolution
 
-Table occurrences (`external_file_reference`), Perform Script steps (`external_file` param) and button Perform Script calls (`external_file` on the button) name a data source, not a file. The merger resolves each data source of each file like this:
+Table occurrences (`external_file_reference`), Perform Script steps (`external_file` param) button Perform Script calls (`external_file` on the button) and value lists (`external_file`, shape unconfirmed, see Value Lists) name a data source, not a file. The merger resolves each data source of each file like this:
 
 1. Try each `paths` entry in order. Take the file name after the last `/` (`fmnet:/*/Data` → `Data`) and match it to a parsed file: exact file name, then the name without its FM extension, then the same case-insensitively. The first entry that matches wins (`resolved_via: "path"`, `matched_path`).
 2. Only when no path entry matches, match the data-source name the same way (`resolved_via: "name_fallback"`).
