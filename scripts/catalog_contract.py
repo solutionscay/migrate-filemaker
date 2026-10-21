@@ -43,18 +43,36 @@ def slug(value: str) -> str:
     return cleaned[:80] or "unnamed"
 
 
-def grouped_filename(group: str, identity: str, root_name: str | None = None) -> str:
+def grouped_filename(
+    group: str, identity: str, root_name: str | None = None, source_file: str | None = None
+) -> str:
+    """The CSV of a group. In a multi-file spec, pass `source_file`: groups with
+    the same name in different files then get different CSVs, the root group
+    included (`_root--<hash>.csv`). A one-file spec keeps `_root.csv`."""
+    if source_file is not None:
+        identity = token(source_file, identity)
     if not group and root_name:
-        return root_name
+        if source_file is None:
+            return root_name
+        stem, dot, ext = root_name.rpartition(".")
+        return f"{stem}--{digest_text(identity)[:8]}.{ext}" if dot else f"{root_name}--{digest_text(identity)[:8]}"
     return f"{slug(group)}--{digest_text(identity)[:8]}.csv"
 
 
 def flatten(kind: str, value: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    # Group names repeat across files (two files with a folder "Utilities").
+    # In a multi-file spec the file is part of every group's output file.
+    if kind == "calculations":
+        files = {table.get("source_file") for table in value}
+    else:
+        files = {item.get("source_file") for item in value}
+    multi = len(files) > 1
+    src = (lambda item: item.get("source_file")) if multi else (lambda item: None)
     if kind == "scripts":
         for index, item in enumerate(value):
             identity = token("script", item.get("source_file"), item.get("id"))
-            rows.append(make_entry(index, identity, item.get("name"), item.get("group", ""), item, "_root.csv"))
+            rows.append(make_entry(index, identity, item.get("name"), item.get("group", ""), item, "_root.csv", src(item)))
     elif kind == "calculations":
         index = 0
         for table in value:
@@ -62,12 +80,12 @@ def flatten(kind: str, value: Any) -> list[dict[str, Any]]:
                 identity = token(
                     "calculation", table.get("source_file"), table.get("id"), item.get("id")
                 )
-                rows.append(make_entry(index, identity, item.get("name"), table.get("name", ""), item))
+                rows.append(make_entry(index, identity, item.get("name"), table.get("name", ""), item, source_file=src(table)))
                 index += 1
     elif kind == "functions":
         for index, item in enumerate(value):
             identity = token("function", item.get("source_file"), item.get("id"))
-            rows.append(make_entry(index, identity, item.get("name"), "custom-functions", item))
+            rows.append(make_entry(index, identity, item.get("name"), "custom-functions", item, source_file=src(item)))
     elif kind in ("conditional-formatting", "hide-rules"):
         occurrences: defaultdict[str, int] = defaultdict(int)
         prefix = "cf" if kind == "conditional-formatting" else "hide"
@@ -77,7 +95,8 @@ def flatten(kind: str, value: Any) -> list[dict[str, Any]]:
             occurrence = occurrences[base]
             occurrences[base] += 1
             identity = token(base, occurrence)
-            rows.append(make_entry(index, identity, item.get("object_name") or "(unnamed)", item.get("layout", ""), item))
+            rows.append(make_entry(index, identity, item.get("object_name") or "(unnamed)", item.get("layout", ""), item,
+                                  source_file=src(item)))
     else:
         raise ValueError(f"unsupported kind: {kind}")
     return rows
@@ -90,6 +109,7 @@ def make_entry(
     group: str,
     item: dict[str, Any],
     root_name: str | None = None,
+    source_file: str | None = None,
 ) -> dict[str, Any]:
     source_hash = digest_text(canonical(item))
     return {
@@ -97,7 +117,7 @@ def make_entry(
         "source_id": identity,
         "source_hash": source_hash,
         "label": label or "",
-        "output_file": grouped_filename(group, group, root_name),
+        "output_file": grouped_filename(group, group, root_name, source_file),
     }
 
 
