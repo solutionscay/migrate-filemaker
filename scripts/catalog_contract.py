@@ -177,7 +177,7 @@ def is_flat_layout(catalog: dict[str, Any]) -> bool:
 
 def flat_layout_message(args: argparse.Namespace) -> str:
     command = (
-        f"python3 catalog_contract.py snapshot --kind {args.kind} --spec {args.spec} "
+        f"python3 {Path(__file__).resolve()} snapshot --kind {args.kind} --spec {args.spec} "
         f"--output {args.output}"
     )
     return (
