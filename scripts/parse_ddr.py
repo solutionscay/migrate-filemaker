@@ -1464,7 +1464,9 @@ class DDRMerger:
 
             for layout in ddr.layouts:
                 for button in layout.get("buttons", []):
-                    if "external_file" not in button:
+                    # Open File buttons carry a FileReference too; they call
+                    # no script. A calculated Perform Script has no <Script>.
+                    if "external_file" not in button or not button.get("action", "").startswith("Perform Script"):
                         continue
                     ext_file = button["external_file"]
                     resolved = self._resolve_external_ref(ddr.source_file, ext_file)

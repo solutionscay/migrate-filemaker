@@ -415,8 +415,13 @@ The parser records the `FileReference` name as `external_file` and the
 FileMaker allows duplicate script names, so resolve a call by target file plus
 `script_id`. The name alone is ambiguous.
 
-Each call with a `FileReference`, from a script step or a button, becomes a
-row in `00_topology.json` → `cross_file_references.script_calls`:
+Each call with a `FileReference`, from a script step or a Perform Script
+button, becomes a row in `00_topology.json` → `cross_file_references.script_calls`.
+An `Open File` button also carries a `FileReference` (as `external_file` on the
+button) but calls no script, so it is not a row. A Perform Script step that picks
+its script by calculation has no `<Script>` element: its row has an empty
+`calls_script` and a `null` `calls_script_id`. A `<Script>` with an `id` but an
+empty `name` also occurs; the id is kept.
 
 | Key | Meaning |
 |---|---|

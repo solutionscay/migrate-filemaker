@@ -905,6 +905,12 @@ class CrossFileScriptCallTest(unittest.TestCase):
         })
         self.assertEqual(row["resolved_to"], "Backend.fmp12")
 
+    def test_open_file_button_is_not_a_script_call(self):
+        """In the real DDRs every button with a FileReference was Open File.
+        Those reached script_calls as calls with no script."""
+        self.assertEqual(sorted(c["object_key"] for c in self.calls if c["origin"] == "button"),
+                         ["7", "8"])
+
     def test_unresolved_button_call_is_reported(self):
         unresolved = [r for r in self.topology["unresolved_references"]
                       if r["type"] == "script_call"]
