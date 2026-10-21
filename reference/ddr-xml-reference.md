@@ -269,9 +269,12 @@ having them.
 
 Search **nested** `<Step>` elements (`el.iter("Step")`) across all four tags, not
 just direct children. Each button records `script` and `script_id` from the
-`<Script>` child. Dedup on `(action, script, script_id)` — keying on script name
-alone collapses distinct scriptless buttons together, and dropping the id merges
-same-named scripts.
+`<Script>` child, `external_file` from a `<FileReference>` child (the script is
+in another file, exactly as for a Perform Script step), and `object_key` /
+`object_name` from the nearest enclosing `<Object>`. Dedup on
+`(action, script, script_id, external_file)` — keying on script name alone
+collapses distinct scriptless buttons together, and dropping the id or file
+merges same-named scripts.
 
 ### Conditional Formatting
 
@@ -412,16 +415,19 @@ The parser records the `FileReference` name as `external_file` and the
 FileMaker allows duplicate script names, so resolve a call by target file plus
 `script_id`. The name alone is ambiguous.
 
-Each call with a `FileReference` becomes a row in
-`00_topology.json` → `cross_file_references.script_calls`:
+Each call with a `FileReference`, from a script step or a button, becomes a
+row in `00_topology.json` → `cross_file_references.script_calls`:
 
 | Key | Meaning |
 |---|---|
-| `from_file`, `script`, `script_id` | Calling file and calling script |
-| `step`, `step_id` | Calling step name and its id inside the script |
+| `origin` | `script_step` or `button` |
+| `from_file` | Calling file |
+| `script`, `script_id` | Calling script (`script_step` rows only) |
+| `step`, `step_id` | Calling step name, and its id inside the script (`step_id` on `script_step` rows only) |
+| `layout`, `layout_id`, `button_type`, `object_key`, `object_name` | Layout and button object that makes the call (`button` rows only; `object_name` is `null` when the object has no name) |
 | `calls_script`, `calls_script_id` | Target script name and id in the target file |
 | `external_ref` | `FileReference` name (External Data Source) |
-| `resolved_to` | Parsed file the reference resolves to, or `null` (also listed in `unresolved_references`) |
+| `resolved_to` | Parsed file the reference resolves to, or `null` (also listed in `unresolved_references` with the same `origin`) |
 
 ## Value Lists
 
@@ -564,7 +570,8 @@ ODBC sources indicate the FM solution connects to an external SQL database. Thes
 The parser uses External Data Source names to resolve cross-file references:
 1. Table occurrences with `<FileReference>` child → `external_file_reference` field
 2. Perform Script steps with `<FileReference>` child → `external_file` param
-3. The merger maps symbolic names to actual parsed files via name matching
+3. Button Perform Script steps with `<FileReference>` child → `external_file` on the button
+4. The merger maps symbolic names to actual parsed files via name matching
 
 ## FileMaker Naming Conventions (informational)
 

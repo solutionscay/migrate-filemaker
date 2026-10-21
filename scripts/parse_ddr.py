@@ -743,7 +743,9 @@ class DDRFile:
         cond_formatting = []
         hide_conditions = []
 
-        def walk(el):
+        # `obj` is the nearest enclosing <Object>; a button's Step sits inside
+        # a *ButtonObj child of it, which carries no key or name of its own.
+        def walk(el, obj=None):
             if el.tag == "Object":
                 otype = el.get("type", "")
                 obj_name = el.get("name", "")
@@ -820,18 +822,29 @@ class DDRFile:
                     if not action:
                         continue
                     b = {"action": action, "button_type": el.tag}
+                    if obj is not None:
+                        if obj.get("key"):
+                            b["object_key"] = obj.get("key")
+                        if obj.get("name"):
+                            b["object_name"] = obj.get("name")
                     script_ref = step.find("Script")
                     if script_ref is not None:
                         b["script"] = script_ref.get("name", "")
                         if script_ref.get("id"):
                             b["script_id"] = script_ref.get("id")
+                    # Same <FileReference> a Perform Script step carries: the
+                    # script lives in another file. Without it a consumer
+                    # resolves the call against this layout's own file.
+                    file_ref = step.find("FileReference")
+                    if file_ref is not None:
+                        b["external_file"] = file_ref.get("name", "")
                     step_text = step.find("StepText")
                     if step_text is not None and step_text.text:
                         b["description"] = step_text.text.strip()
                     buttons.append(b)
 
             for c in el:
-                walk(c)
+                walk(c, el if el.tag == "Object" else obj)
 
         for child in layout_el:
             walk(child)
@@ -845,15 +858,17 @@ class DDRFile:
                 seen.add(key)
                 unique_fields.append(f)
 
-        # Deduplicate buttons on (action, script, script_id). Keying on script
-        # alone collapses distinct actions that call no script -- and
-        # `.get("script", default)` returns "" rather than the default when the
-        # key exists but is empty, so scriptless buttons all collided on "".
-        # The id keeps same-named scripts in different folders apart.
+        # Deduplicate buttons on (action, script, script_id, external_file).
+        # Keying on script alone collapses distinct actions that call no script
+        # -- and `.get("script", default)` returns "" rather than the default
+        # when the key exists but is empty, so scriptless buttons all collided
+        # on "". The id and file keep same-named scripts in different folders
+        # or files apart.
         seen_btns = set()
         unique_buttons = []
         for b in buttons:
-            key = (b.get("action", ""), b.get("script", ""), b.get("script_id", ""))
+            key = (b.get("action", ""), b.get("script", ""),
+                   b.get("script_id", ""), b.get("external_file", ""))
             if key[0] and key not in seen_btns:
                 seen_btns.add(key)
                 unique_buttons.append(b)
@@ -1294,8 +1309,8 @@ class DDRMerger:
                             "context": f"TO '{to['name']}' references file '{ref_name}'",
                         })
 
-            # Track cross-file script calls. Ids are kept because script
-            # names repeat.
+            # Track cross-file script calls. `origin` tells a script step call
+            # from a button call; ids are kept because script names repeat.
             for script in ddr.scripts:
                 for step in script.get("steps", []):
                     params = step.get("params", {})
@@ -1303,6 +1318,7 @@ class DDRMerger:
                         ext_file = params["external_file"]
                         resolved = self._resolve_external_ref(ddr.source_file, ext_file)
                         entry = {
+                            "origin": "script_step",
                             "from_file": ddr.source_file,
                             "script": script["name"],
                             "script_id": script.get("id"),
@@ -1317,10 +1333,41 @@ class DDRMerger:
                         if resolved is None:
                             unresolved_refs.append({
                                 "type": "script_call",
+                                "origin": "script_step",
                                 "from_file": ddr.source_file,
                                 "reference": ext_file,
                                 "context": f"Script '{script['name']}' calls script in file '{ext_file}'",
                             })
+
+            for layout in ddr.layouts:
+                for button in layout.get("buttons", []):
+                    if "external_file" not in button:
+                        continue
+                    ext_file = button["external_file"]
+                    resolved = self._resolve_external_ref(ddr.source_file, ext_file)
+                    entry = {
+                        "origin": "button",
+                        "from_file": ddr.source_file,
+                        "layout": layout.get("name"),
+                        "layout_id": layout.get("id"),
+                        "button_type": button.get("button_type"),
+                        "object_key": button.get("object_key"),
+                        "object_name": button.get("object_name"),
+                        "step": button.get("action"),
+                        "calls_script": button.get("script", ""),
+                        "calls_script_id": button.get("script_id"),
+                        "external_ref": ext_file,
+                        "resolved_to": resolved,
+                    }
+                    cross_file_scripts.append(entry)
+                    if resolved is None:
+                        unresolved_refs.append({
+                            "type": "script_call",
+                            "origin": "button",
+                            "from_file": ddr.source_file,
+                            "reference": ext_file,
+                            "context": f"Button on layout '{layout.get('name')}' calls script in file '{ext_file}'",
+                        })
 
             # Check EDS references to files not in our set
             for eds in ddr.external_data_sources:

@@ -134,10 +134,12 @@ EXPECTED_LAYOUTS = [
         "buttons": [
             # A plain ButtonObj -- ignored outright by the original parser.
             {"action": "Perform Script", "button_type": "ButtonObj",
+             "object_key": "2",
              "script": "Send Officer Dispositions", "script_id": "79",
              "description": "Perform Script [ “Send Officer Dispositions” ]"},
             # A GroupButtonObj container whose Step is one level deeper.
             {"action": "Perform Script", "button_type": "GroupButtonObj",
+             "object_key": "3",
              "script": "Set is_Closed from GJ Status", "script_id": "1539",
              "description": "Perform Script [ “Set is_Closed from GJ Status” ]"},
         ],
@@ -754,6 +756,68 @@ class MultiFileSecurityMergeTest(unittest.TestCase):
         self.assertEqual(p["attrs_by_file"][self.DATA]["printing"], "True")
         self.assertEqual(p["access_source_file"], self.UI)
         self.assertEqual(p["printing"], "False")
+
+
+TWO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "two_file")
+
+
+class CrossFileScriptCallTest(unittest.TestCase):
+    """UI.fmp12 calls Save in Backend.fmp12 from a script step and from a
+    button. Backend.fmp12 has two scripts named Save (ids 21 and 22). Buttons
+    used to drop their FileReference, so the button call resolved against
+    UI.fmp12 and never reached cross_file_references (#4). Every script
+    reference used to drop the script id, so the two Saves could not be told
+    apart (#8). A second button calls a file with no DDR (Gone)."""
+
+    @classmethod
+    def setUpClass(cls):
+        with contextlib.redirect_stdout(io.StringIO()):
+            cls.files = []
+            for name in ("UI.xml", "Backend.xml"):
+                ddr = parse_ddr.DDRFile(os.path.join(TWO_FILE, name))
+                ddr.parse_all()
+                cls.files.append(ddr)
+            cls.merger = parse_ddr.DDRMerger(cls.files)
+            cls.topology = cls.merger.merge_topology()
+        cls.calls = cls.topology["cross_file_references"]["script_calls"]
+
+    def test_step_keeps_the_target_script_id(self):
+        params = self.files[0].scripts[0]["steps"][0]["params"]
+        self.assertEqual((params["script"], params["script_id"], params["external_file"]),
+                         ("Save", "21", "Backend"))
+
+    def test_button_keeps_the_file_reference_and_script_id(self):
+        button = self.files[0].layouts[0]["buttons"][0]
+        self.assertEqual((button["script"], button["script_id"], button["external_file"]),
+                         ("Save", "22", "Backend"))
+        self.assertEqual((button["object_key"], button["object_name"]), ("7", "btnSave"))
+
+    def test_step_call_row_carries_step_and_script_ids(self):
+        row = next(c for c in self.calls if c["origin"] == "script_step")
+        self.assertEqual(row, {
+            "origin": "script_step", "from_file": "UI.fmp12",
+            "script": "Go", "script_id": "3", "step": "Perform Script", "step_id": "4",
+            "calls_script": "Save", "calls_script_id": "21",
+            "external_ref": "Backend", "resolved_to": "Backend.fmp12",
+        })
+
+    def test_button_call_row_is_marked_and_resolved_like_a_step(self):
+        row = next(c for c in self.calls if c["origin"] == "button" and c["object_key"] == "7")
+        self.assertEqual(row, {
+            "origin": "button", "from_file": "UI.fmp12",
+            "layout": "Home", "layout_id": "5", "button_type": "ButtonObj",
+            "object_key": "7", "object_name": "btnSave", "step": "Perform Script",
+            "calls_script": "Save", "calls_script_id": "22",
+            "external_ref": "Backend",
+            "resolved_to": self.merger._resolve_external_ref("UI.fmp12", "Backend"),
+        })
+        self.assertEqual(row["resolved_to"], "Backend.fmp12")
+
+    def test_unresolved_button_call_is_reported(self):
+        unresolved = [r for r in self.topology["unresolved_references"]
+                      if r["type"] == "script_call"]
+        self.assertEqual(len(unresolved), 1)
+        self.assertEqual((unresolved[0]["origin"], unresolved[0]["reference"]), ("button", "Gone"))
 
 
 if __name__ == "__main__":
