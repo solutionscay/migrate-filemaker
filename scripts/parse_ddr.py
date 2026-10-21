@@ -564,14 +564,18 @@ class DDRFile:
         """Extract conditional formatting and hide-object-when from parsed layouts."""
         for layout in self.layouts:
             layout_name = layout.get("name", "")
+            # Layout names can repeat within a file; the id tells them apart.
+            layout_id = layout.get("id")
             for cf in layout.get("conditional_formatting", []):
                 entry = dict(cf)
                 entry["layout"] = layout_name
+                entry["layout_id"] = layout_id
                 self._inject_source(entry)
                 self.conditional_formatting.append(entry)
             for hc in layout.get("hide_conditions", []):
                 entry = dict(hc)
                 entry["layout"] = layout_name
+                entry["layout_id"] = layout_id
                 self._inject_source(entry)
                 self.hide_conditions.append(entry)
 

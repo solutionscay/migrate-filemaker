@@ -42,6 +42,8 @@ source_file,layout_id,layout_name,object_key,object_type,parent/container_path,b
 
 Use raw XML ids/object keys when emitted. If no stable key exists, combine source file, layout id, object type, bounds, and container path, then label the identity `derived` and verify it against a screenshot. Never join hide/CF rules to an object by array position.
 
+Each hide and CF rule in `09_conditional_formatting.json` and `10_hide_object_when.json` carries `source_file`, `layout_id`, and `layout` (the name). Group `hide_rule_ids` and `cf_rule_ids` by `source_file` + `layout_id`. Do not group by layout name: names can repeat within one file.
+
 Record unnamed/unattributed hide and CF rules separately until this mapping is proven.
 
 ## Step 3: Inventory screens and workflows

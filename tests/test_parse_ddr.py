@@ -351,6 +351,7 @@ EXPECTED_CONDITIONAL_FORMATTING = [
         "formula": "Intakes::Juvenile_boolean",
         "format_css": "self:normal .self { color: rgba(85.098%,4.31373%,0%,1); }",
         "layout": "Intake Detail",
+        "layout_id": "11",
         "source_file": SRC,
     }
 ]
@@ -365,6 +366,7 @@ EXPECTED_HIDE_CONDITIONS = [
         # author-ownership check.
         "formula": "Get ( AccountName ) ≠ Case_Notes::log_created_account",
         "layout": "Intake Detail",
+        "layout_id": "11",
         "source_file": SRC,
     },
     {
@@ -373,6 +375,7 @@ EXPECTED_HIDE_CONDITIONS = [
         # Produced by the chunk-walker fallback, not by <Calculation> text.
         "formula": "IsEmpty ( LINE_ITEMS_Restitution::Balance_Due )",
         "layout": "Restitution Report",
+        "layout_id": "12",
         "source_file": SRC,
     },
 ]
