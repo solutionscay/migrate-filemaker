@@ -298,10 +298,13 @@ def parse_script_steps(step_list):
         # Collect relevant parameters
         params = {}
 
-        # Script reference (Perform Script)
+        # Script reference (Perform Script). Keep the id: FileMaker allows
+        # duplicate script names, so the name alone is ambiguous.
         sr = step.find("Script")
         if sr is not None:
             params["script"] = sr.get("name", "")
+            if sr.get("id"):
+                params["script_id"] = sr.get("id")
 
         # FileReference in Perform Script steps (cross-file call)
         fr_ref = step.find("FileReference")
@@ -820,6 +823,8 @@ class DDRFile:
                     script_ref = step.find("Script")
                     if script_ref is not None:
                         b["script"] = script_ref.get("name", "")
+                        if script_ref.get("id"):
+                            b["script_id"] = script_ref.get("id")
                     step_text = step.find("StepText")
                     if step_text is not None and step_text.text:
                         b["description"] = step_text.text.strip()
@@ -840,14 +845,15 @@ class DDRFile:
                 seen.add(key)
                 unique_fields.append(f)
 
-        # Deduplicate buttons on (action, script). Keying on script alone
-        # collapses distinct actions that call no script -- and `.get("script",
-        # default)` returns "" rather than the default when the key exists but
-        # is empty, so scriptless buttons all collided on "".
+        # Deduplicate buttons on (action, script, script_id). Keying on script
+        # alone collapses distinct actions that call no script -- and
+        # `.get("script", default)` returns "" rather than the default when the
+        # key exists but is empty, so scriptless buttons all collided on "".
+        # The id keeps same-named scripts in different folders apart.
         seen_btns = set()
         unique_buttons = []
         for b in buttons:
-            key = (b.get("action", ""), b.get("script", ""))
+            key = (b.get("action", ""), b.get("script", ""), b.get("script_id", ""))
             if key[0] and key not in seen_btns:
                 seen_btns.add(key)
                 unique_buttons.append(b)
@@ -1288,7 +1294,8 @@ class DDRMerger:
                             "context": f"TO '{to['name']}' references file '{ref_name}'",
                         })
 
-            # Track cross-file script calls
+            # Track cross-file script calls. Ids are kept because script
+            # names repeat.
             for script in ddr.scripts:
                 for step in script.get("steps", []):
                     params = step.get("params", {})
@@ -1298,8 +1305,11 @@ class DDRMerger:
                         entry = {
                             "from_file": ddr.source_file,
                             "script": script["name"],
+                            "script_id": script.get("id"),
                             "step": step.get("name"),
+                            "step_id": step.get("id"),
                             "calls_script": params.get("script", ""),
+                            "calls_script_id": params.get("script_id"),
                             "external_ref": ext_file,
                             "resolved_to": resolved,
                         }

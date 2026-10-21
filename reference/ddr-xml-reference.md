@@ -268,8 +268,10 @@ having them.
 ```
 
 Search **nested** `<Step>` elements (`el.iter("Step")`) across all four tags, not
-just direct children. Dedup on `(action, script)` — keying on script name alone
-collapses distinct scriptless buttons together.
+just direct children. Each button records `script` and `script_id` from the
+`<Script>` child. Dedup on `(action, script, script_id)` — keying on script name
+alone collapses distinct scriptless buttons together, and dropping the id merges
+same-named scripts.
 
 ### Conditional Formatting
 
@@ -405,7 +407,21 @@ Perform Script steps can call scripts in other files. This is indicated by a `<F
 </Step>
 ```
 
-The parser records the `FileReference` name as `external_file` in the step's `params`.
+The parser records the `FileReference` name as `external_file` and the
+`<Script>` `name` and `id` as `script` and `script_id` in the step's `params`.
+FileMaker allows duplicate script names, so resolve a call by target file plus
+`script_id`. The name alone is ambiguous.
+
+Each call with a `FileReference` becomes a row in
+`00_topology.json` → `cross_file_references.script_calls`:
+
+| Key | Meaning |
+|---|---|
+| `from_file`, `script`, `script_id` | Calling file and calling script |
+| `step`, `step_id` | Calling step name and its id inside the script |
+| `calls_script`, `calls_script_id` | Target script name and id in the target file |
+| `external_ref` | `FileReference` name (External Data Source) |
+| `resolved_to` | Parsed file the reference resolves to, or `null` (also listed in `unresolved_references`) |
 
 ## Value Lists
 
