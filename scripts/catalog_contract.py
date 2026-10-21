@@ -149,10 +149,18 @@ def snapshot(args: argparse.Namespace) -> int:
         "count": len(entries),
         "entries": entries,
     }
-    if args.output.exists() and not args.force:
+    migrate_root = getattr(args, "migrate_csv_root", None)
+    if migrate_root is not None:
+        old = json.loads(args.output.read_text(encoding="utf-8")) if args.output.exists() else {}
+        if not is_flat_layout(old):
+            raise ValueError(f"{args.output} is not a catalog from before the per-file folders; nothing to migrate")
+        migrate_flat_csvs(migrate_root, entries)
+    elif args.output.exists() and not args.force:
         with args.output.open(encoding="utf-8") as handle:
             old = json.load(handle)
         if old != payload:
+            if is_flat_layout(old):
+                raise ValueError(flat_layout_message(args))
             raise ValueError("explorer source changed; archive/rebuild classifications, then use --force")
         print("catalog unchanged")
         return 0
@@ -160,6 +168,75 @@ def snapshot(args: argparse.Namespace) -> int:
     args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {args.output} ({len(entries)} identities)")
     return 0
+
+
+def is_flat_layout(catalog: dict[str, Any]) -> bool:
+    """True for a catalog built before output_file gained the <file-slug>--<hash8>/ folder."""
+    return any("/" not in entry.get("output_file", "/") for entry in catalog.get("entries", []))
+
+
+def flat_layout_message(args: argparse.Namespace) -> str:
+    command = (
+        f"python3 catalog_contract.py snapshot --kind {args.kind} --spec {args.spec} "
+        f"--output {args.output}"
+    )
+    return (
+        f"{args.output} was built before output_file gained the per-source-file folder "
+        "(<file-slug>--<hash8>/). Its CSVs sit flat under the CSV root and no longer match.\n"
+        f"Move rows whose source_hash still matches into the new folders:\n  {command} "
+        "--migrate-csv-root <CSV_ROOT>\n"
+        f"Or archive the CSV root outside it, rebuild, and reclassify:\n  {command} --force"
+    )
+
+
+def migrate_flat_csvs(csv_root: Path, entries: list[dict[str, Any]]) -> None:
+    """Move rows from flat CSVs into each entry's new output_file.
+
+    All or nothing: every row must match a new entry by source_id and
+    source_hash. The old CSVs move to <csv_root>.pre-folder-layout/, outside
+    the CSV root, so verify does not count them twice.
+    """
+    archive = csv_root.parent / f"{csv_root.name}.pre-folder-layout"
+    if archive.exists():
+        raise ValueError(f"{archive} already exists; remove it or move it away first")
+    if any(path.parent != csv_root for path in csv_paths(csv_root)):
+        raise ValueError(f"{csv_root} already has CSVs in subfolders; migrate by hand")
+    by_id = {entry["source_id"]: entry for entry in entries}
+    targets: dict[str, tuple[list[str], list[dict[str, str]]]] = {}
+    unmatched = 0
+    old_files = list(csv_paths(csv_root))
+    for path in old_files:
+        with path.open(newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            fieldnames = list(reader.fieldnames or [])
+            if not {"source_id", "source_hash"}.issubset(fieldnames):
+                raise ValueError(f"{path} lacks required columns: source_id, source_hash")
+            for row in reader:
+                entry = by_id.get(row["source_id"])
+                if not entry or entry["source_hash"] != row["source_hash"]:
+                    unmatched += 1
+                    continue
+                header, rows = targets.setdefault(entry["output_file"], (fieldnames, []))
+                if header != fieldnames:
+                    raise ValueError(f"{entry['output_file']} would mix CSVs with different columns")
+                rows.append(row)
+    if unmatched:
+        raise ValueError(
+            f"cannot migrate: {unmatched} row(s) have no new entry with the same source_id and "
+            "source_hash. Nothing was moved. Archive the CSV root, rebuild with --force, and reclassify."
+        )
+    for name, (fieldnames, rows) in targets.items():
+        target = csv_root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("x", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+    archive.mkdir()
+    for path in old_files:
+        path.rename(archive / path.name)
+    print(f"migrated {sum(len(rows) for _, rows in targets.values())} rows into {len(targets)} CSVs; "
+          f"old CSVs archived in {archive}")
 
 
 def csv_paths(root: Path) -> Iterable[Path]:
@@ -211,6 +288,10 @@ def parse_args() -> argparse.Namespace:
     create.add_argument("--spec", required=True, type=Path)
     create.add_argument("--output", required=True, type=Path)
     create.add_argument("--force", action="store_true")
+    create.add_argument(
+        "--migrate-csv-root", type=Path,
+        help="move flat CSVs from a pre-folder catalog into the new output_file paths",
+    )
     check = subs.add_parser("verify")
     check.add_argument("--catalog", required=True, type=Path)
     check.add_argument("--csv-root", required=True, type=Path)

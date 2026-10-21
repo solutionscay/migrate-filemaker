@@ -1,6 +1,8 @@
 import argparse
+import contextlib
 import csv
 import importlib.util
+import io
 import json
 import tempfile
 import unittest
@@ -224,6 +226,63 @@ class CatalogContractTests(unittest.TestCase):
         ]
         entries = catalog_contract.flatten("hide-rules", rules)
         self.assertNotEqual(entries[0]["output_file"], entries[1]["output_file"])
+
+    def flat_catalog(self, root, scripts):
+        """A catalog and CSVs as built before output_file gained its folder."""
+        output = self.snapshot(root, scripts)
+        catalog = json.loads(output.read_text(encoding="utf-8"))
+        for entry in catalog["entries"]:
+            entry["output_file"] = entry["output_file"].split("/", 1)[1]
+        output.write_text(json.dumps(catalog), encoding="utf-8")
+        return output, self.write_csvs(root, catalog)
+
+    def run_snapshot(self, root, **extra):
+        return catalog_contract.snapshot(argparse.Namespace(
+            kind="scripts", spec=root / "05_scripts.json", output=root / "source_catalog.json",
+            force=False, **extra,
+        ))
+
+    def test_flat_catalog_fails_with_cause_and_rebuild_command(self):
+        scripts = [{"source_file": "A.fmp12", "id": "1", "group": "Ops", "name": "Run", "steps": []}]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.flat_catalog(root, scripts)
+            with self.assertRaises(ValueError) as caught:
+                self.run_snapshot(root)
+            message = str(caught.exception)
+            self.assertIn("per-source-file folder", message)
+            self.assertIn("--migrate-csv-root", message)
+            self.assertIn("--force", message)
+
+    def test_migrate_moves_matching_rows_into_new_folders(self):
+        scripts = [
+            {"source_file": "A.fmp12", "id": "1", "group": "Utilities", "name": "Log", "steps": []},
+            {"source_file": "B.fmp12", "id": "1", "group": "Utilities", "name": "Log", "steps": []},
+            {"source_file": "A.fmp12", "id": "2", "group": "", "name": "Open", "steps": []},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output, csv_root = self.flat_catalog(root, scripts)
+            self.assertEqual(len(list(csv_root.glob("*.csv"))), 2)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.run_snapshot(root, migrate_csv_root=csv_root)
+                self.assertEqual(
+                    catalog_contract.verify(argparse.Namespace(catalog=output, csv_root=csv_root)), 0
+                )
+            self.assertEqual(len(list(csv_root.rglob("*.csv"))), 3)
+            self.assertEqual(len(list((root / "catalogs.pre-folder-layout").glob("*.csv"))), 2)
+
+    def test_migrate_moves_nothing_when_a_row_hash_changed(self):
+        scripts = [{"source_file": "A.fmp12", "id": "1", "group": "Ops", "name": "Run", "steps": []}]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, csv_root = self.flat_catalog(root, scripts)
+            scripts[0]["steps"] = ["changed"]
+            (root / "05_scripts.json").write_text(json.dumps(scripts), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                self.run_snapshot(root, migrate_csv_root=csv_root)
+            self.assertEqual(len(list(csv_root.glob("*.csv"))), 1)
+            self.assertFalse((root / "catalogs.pre-folder-layout").exists())
 
     def test_coverage_rejects_duplicate_missing_and_changed_rows(self):
         scripts = [

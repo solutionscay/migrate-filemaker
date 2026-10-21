@@ -42,6 +42,23 @@ Each `output_file` is a relative path `<source-file>--<hash>/<group-file>`. The 
 
 If `snapshot` reports that the source changed, stop. Archive or delete the stale classification directory, recreate the catalog with `--force`, and reclassify. Do not carry rows forward by index. A manual carry-forward is allowed only after matching `source_id` and verifying `source_hash`; record that operation.
 
+### Catalogs from before the per-file folders
+
+Older catalogs have flat `output_file` names with no `<source-file>--<hash>/` folder. `snapshot` stops on such a catalog and prints the two ways forward:
+
+1. Move rows that are still valid into the new folders:
+
+   ```bash
+   python3 "$SKILL_DIR/scripts/catalog_contract.py" snapshot \
+     --kind scripts --spec "$SPEC_FILE" --output "$CATALOG" --migrate-csv-root "$CSV_ROOT"
+   ```
+
+   Each row must match a new entry by `source_id` and `source_hash`. If one row does not match, nothing moves. If all match, the rows go into their new `output_file`, the old flat CSVs move to `$CSV_ROOT.pre-folder-layout/` (outside `CSV_ROOT`), and the catalog is rewritten. Then run `verify`.
+
+2. If the migration refuses, archive `CSV_ROOT` outside the explorer directory, run `snapshot ... --force`, and reclassify.
+
+Conditional-formatting and hide-rule rows never migrate: each item now carries `layout_id`, so every `source_id` and `source_hash` changed. Use option 2 for them.
+
 ## Required CSV columns
 
 Every classification CSV must include:
