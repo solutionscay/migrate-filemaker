@@ -1,5 +1,7 @@
 # migrate-filemaker
 
+![migrate-filemaker: from a FileMaker DDR to a verified, documented rebuild plan](assets/banner.png)
+
 An evidence-first coding-agent skill for recovering FileMaker behavior from Database Design Report XML and planning a verifiable rebuild.
 
 It includes a standard-library Python parser, provenance and explorer-coverage gates, FileMaker semantic references, workflow guides, and migration artifact templates.
