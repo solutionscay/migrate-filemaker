@@ -409,6 +409,25 @@ def find_ddr_reports(path):
     sys.exit(1)
 
 
+def check_unique_source_files(ddr_files):
+    """Stop when two inputs carry the same DDR `File name`.
+
+    source_file is the key that keeps ids apart across files. Two exports of
+    the same file (an old and a new UI.fmp12 in one folder) would mix their
+    tables, layouts and value lists, and merge_security would keep only the
+    last one's access data.
+    """
+    seen = {}
+    for ddr in ddr_files:
+        first = seen.setdefault(ddr.source_file, ddr.filepath)
+        if first != ddr.filepath:
+            print(f"Error: two DDR inputs have the same File name "
+                  f"'{ddr.source_file}':\n  - {first}\n  - {ddr.filepath}\n"
+                  f"Remove one of them (for example an older export) and run again.",
+                  file=sys.stderr)
+            sys.exit(1)
+
+
 # ─── WRITE HELPER ────────────────────────────────────────────────────────────
 
 def write_json(output_dir, name, data):
@@ -1561,6 +1580,7 @@ if __name__ == "__main__":
         ddr = DDRFile(rp)
         ddr.parse_all()
         ddr_files.append(ddr)
+    check_unique_source_files(ddr_files)
 
     # Merge and write
     merger = DDRMerger(ddr_files)

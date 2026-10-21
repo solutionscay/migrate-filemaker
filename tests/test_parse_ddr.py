@@ -756,5 +756,28 @@ class MultiFileSecurityMergeTest(unittest.TestCase):
         self.assertEqual(p["printing"], "False")
 
 
+
+class DuplicateSourceFileTests(unittest.TestCase):
+    """Two inputs with one DDR `File name` would mix their ids. Stop instead."""
+
+    def test_same_file_name_in_two_inputs_stops_and_names_both(self):
+        a = parse_ddr.DDRFile(FIXTURE)
+        b = parse_ddr.DDRFile(FIXTURE)
+        b.filepath = "/elsewhere/old_export.xml"
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as caught:
+            parse_ddr.check_unique_source_files([a, b])
+        self.assertEqual(caught.exception.code, 1)
+        self.assertIn("Mini.fmp12", err.getvalue())
+        self.assertIn(FIXTURE, err.getvalue())
+        self.assertIn("/elsewhere/old_export.xml", err.getvalue())
+
+    def test_distinct_file_names_pass(self):
+        a = parse_ddr.DDRFile(FIXTURE)
+        b = parse_ddr.DDRFile(FIXTURE)
+        b.source_file = "Other.fmp12"
+        parse_ddr.check_unique_source_files([a, b])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
