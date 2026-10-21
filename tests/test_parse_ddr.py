@@ -756,5 +756,79 @@ class MultiFileSecurityMergeTest(unittest.TestCase):
         self.assertEqual(p["printing"], "False")
 
 
+class _StubFile:
+    """The slice of DDRFile that external-reference resolution reads."""
+
+    def __init__(self, source_file, sources=(), occurrences=()):
+        self.source_file = source_file
+        self.external_data_sources = [
+            dict(type="filemaker", id=str(i), source_file=source_file, **s)
+            for i, s in enumerate(sources, 1)]
+        self.table_occurrences = [dict(o, source_file=source_file) for o in occurrences]
+
+
+def _ext_to(name, ref):
+    return {"id": "1", "name": name, "base_table": name, "base_table_id": "1",
+            "external_file_reference": {"name": ref, "id": "1"}}
+
+
+class ExternalReferenceResolutionTest(unittest.TestCase):
+    """Issues #2, #5, #3: references resolved by the data-source alias, in set
+    order, and an unresolved external TO looked like a local one."""
+
+    def test_fixture_pathList_attribute_is_read(self):
+        ddr, _, _, _ = parse_fixture()
+        self.assertEqual(ddr.external_data_sources[0]["paths"], ["file:Mini_Schema"])
+
+    def test_pathList_entries_split_without_breaking_spaced_names(self):
+        self.assertEqual(
+            parse_ddr.split_path_list("file:My Data fmnet:/*/My Data\nfilemac:/HD/x/Data.fmp12"),
+            ["file:My Data", "fmnet:/*/My Data", "filemac:/HD/x/Data.fmp12"])
+        self.assertEqual(parse_ddr.path_target_name("fmnet:/*/My Data"), "My Data")
+
+    def test_alias_resolves_through_its_path(self):
+        ui = _StubFile("UI.fmp12", [{"name": "Backend", "paths": ["file:Data"]}])
+        m = parse_ddr.DDRMerger([ui, _StubFile("Data.fmp12")])
+        self.assertEqual(m._resolve_external_ref("UI.fmp12", "Backend"), "Data.fmp12")
+        self.assertEqual(m.resolve_external_ref_info("UI.fmp12", "Backend")["resolved_via"], "path")
+
+    def test_path_beats_a_file_with_the_alias_name(self):
+        ui = _StubFile("UI.fmp12", [{"name": "Data", "paths": ["file:Archive"]}])
+        m = parse_ddr.DDRMerger([ui, _StubFile("Data.fmp12"), _StubFile("Archive.fmp12")])
+        self.assertEqual(m._resolve_external_ref("UI.fmp12", "Data"), "Archive.fmp12")
+
+    def test_later_path_entry_is_tried_when_the_first_does_not_match(self):
+        ui = _StubFile("UI.fmp12", [{"name": "B", "paths": ["file:Gone", "fmnet:/*/Data"]}])
+        m = parse_ddr.DDRMerger([ui, _StubFile("Data.fmp12")])
+        self.assertEqual(m._resolve_external_ref("UI.fmp12", "B"), "Data.fmp12")
+
+    def test_name_fallback_is_marked(self):
+        ui = _StubFile("UI.fmp12", [{"name": "Data", "paths": ["file:Gone"]}])
+        m = parse_ddr.DDRMerger([ui, _StubFile("Data.fmp12")])
+        self.assertEqual(m.resolve_external_ref_info("UI.fmp12", "Data"),
+                         {"resolved_to": "Data.fmp12", "resolved_via": "name_fallback"})
+
+    def test_ambiguous_match_is_reported_not_picked(self):
+        ui = _StubFile("UI.fmp12", [{"name": "X", "paths": ["file:DATA"]}])
+        m = parse_ddr.DDRMerger([ui, _StubFile("data.fp7"), _StubFile("Data.fmp12")])
+        info = m.resolve_external_ref_info("UI.fmp12", "X")
+        self.assertIsNone(info["resolved_to"])
+        self.assertEqual(info["ambiguous_candidates"], ["Data.fmp12", "data.fp7"])
+
+    def test_resolution_does_not_depend_on_hash_seed(self):
+        import subprocess
+        code = ("import sys; sys.path.insert(0, %r); sys.path.insert(0, %r); "
+                "import parse_ddr, test_parse_ddr as t; "
+                "m = parse_ddr.DDRMerger([t._StubFile('UI.fmp12', [{'name': 'DATA'}]), "
+                "t._StubFile('Data.fmp12'), t._StubFile('data.fp7')]); "
+                "print(m.resolve_external_ref_info('UI.fmp12', 'DATA'))"
+                % (os.path.dirname(parse_ddr.__file__), os.path.dirname(os.path.abspath(__file__))))
+        outs = {subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                               env=dict(os.environ, PYTHONHASHSEED=str(seed))).stdout
+                for seed in range(1, 7)}
+        self.assertEqual(len(outs), 1, outs)
+        self.assertIn("ambiguous_candidates", outs.pop())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

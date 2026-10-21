@@ -1158,14 +1158,17 @@ class DDRFile:
                 "id": fr.get("id", ""),
                 "name": fr.get("name", ""),
             }
+            # A real DDR stores the targets in the pathList attribute
+            # (pathList="file:Data"). Older docs showed PathList/Path
+            # children; read those too in case some DDR version emits them.
+            paths = split_path_list(fr.get("pathList", ""))
             path_list = fr.find("PathList")
             if path_list is not None:
-                paths = []
                 for p in path_list.findall("Path"):
-                    if p.text:
+                    if p.text and p.text.strip():
                         paths.append(p.text.strip())
-                if paths:
-                    entry["paths"] = paths
+            if paths:
+                entry["paths"] = paths
             self._inject_source(entry)
             sources.append(entry)
 
@@ -1183,6 +1186,38 @@ class DDRFile:
         return sources
 
 
+# Each pathList entry starts with a scheme: file:, fmnet:, filemac:, filewin:...
+_PATH_ENTRY_START = re.compile(r"[\r\n]+|\s+(?=[A-Za-z][A-Za-z0-9]*:)")
+_PATH_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9]*:")
+
+
+def split_path_list(value):
+    """Split a FileReference pathList into its entries, in FM's try order.
+
+    Entries are split on line breaks, or on whitespace that is followed by a
+    scheme prefix, so a file name with a space in it stays whole.
+    """
+    if not value:
+        return []
+    return [p.strip() for p in _PATH_ENTRY_START.split(value.strip()) if p.strip()]
+
+
+def path_target_name(path):
+    """The file name a pathList entry points at: 'fmnet:/*/Data' -> 'Data'."""
+    target = _PATH_SCHEME.sub("", path.strip(), count=1)
+    target = re.split(r"[/\\]", target)[-1].strip()
+    return target
+
+
+_FM_EXTENSIONS = (".fmp12", ".fp7", ".fp5", ".fp3", ".fmp")
+
+
+def _strip_fm_extension(name):
+    """'Data.fmp12' -> 'Data'; 'Mini.Schema' stays whole (not an FM extension)."""
+    base, ext = os.path.splitext(name)
+    return base if ext.lower() in _FM_EXTENSIONS else name
+
+
 # ─── DDRMerger CLASS ─────────────────────────────────────────────────────────
 
 class DDRMerger:
@@ -1196,47 +1231,81 @@ class DDRMerger:
         # Used to resolve external file references
         self._eds_map = self._build_eds_map()
 
-    def _build_eds_map(self):
-        """Map external data source names to actual parsed file names."""
-        eds_map = {}
-        known_files = {f.source_file for f in self.files}
+    def _match_known_files(self, name):
+        """Parsed file names that `name` can mean, best tier only, sorted.
 
-        for ddr in self.files:
-            for eds in ddr.external_data_sources:
+        Tiers: exact file name, then exact name without extension, then
+        case-insensitive without extension. More than one result means the
+        match is ambiguous; the caller must not pick one.
+        """
+        known_files = sorted({f.source_file for f in self.files})
+        if not name:
+            return []
+        if name in known_files:
+            return [name]
+        name_base = _strip_fm_extension(name)
+        for same in (lambda a, b: a == b, lambda a, b: a.lower() == b.lower()):
+            hits = [kf for kf in known_files if same(name_base, _strip_fm_extension(kf))]
+            if hits:
+                return hits
+        return []
+
+    def _resolve_eds(self, eds):
+        """Resolve one FileMaker data source to a parsed file.
+
+        Try each pathList entry in order (FM opens the first that exists).
+        Use the data-source name only when no path entry matches a parsed file.
+        """
+        for path in eds.get("paths", []):
+            hits = self._match_known_files(path_target_name(path))
+            if len(hits) == 1:
+                return {"resolved_to": hits[0], "resolved_via": "path", "matched_path": path}
+            if hits:
+                return {"resolved_to": None, "resolved_via": "path", "matched_path": path,
+                        "ambiguous_candidates": hits}
+        hits = self._match_known_files(eds["name"])
+        if len(hits) == 1:
+            return {"resolved_to": hits[0], "resolved_via": "name_fallback"}
+        if hits:
+            return {"resolved_to": None, "resolved_via": "name_fallback",
+                    "ambiguous_candidates": hits}
+        return {"resolved_to": None, "resolved_via": None}
+
+    def _build_eds_map(self):
+        """Map (file, data source name) to its resolution record."""
+        eds_map = {}
+        for ddr in sorted(self.files, key=lambda f: f.source_file):
+            for eds in sorted(ddr.external_data_sources, key=lambda e: (e["name"], e["id"])):
                 if eds["type"] == "filemaker":
-                    eds_name = eds["name"]
-                    # Try to match to a known parsed file
-                    if eds_name in known_files:
-                        eds_map[(ddr.source_file, eds_name)] = eds_name
-                    else:
-                        # Try matching without extension
-                        for kf in known_files:
-                            kf_base = os.path.splitext(kf)[0]
-                            if eds_name == kf_base or eds_name.lower() == kf_base.lower():
-                                eds_map[(ddr.source_file, eds_name)] = kf
-                                break
+                    key = (ddr.source_file, eds["name"])
+                    if key not in eds_map:
+                        eds_map[key] = self._resolve_eds(eds)
         return eds_map
 
+    def resolve_external_ref_info(self, source_file, ref_name):
+        """Resolution record for a reference: resolved_to, resolved_via and,
+        when set, matched_path and ambiguous_candidates."""
+        info = self._eds_map.get((source_file, ref_name))
+        if info is not None:
+            return dict(info)
+        # No data source of that name in the file: match the reference name.
+        hits = self._match_known_files(ref_name)
+        if len(hits) == 1:
+            return {"resolved_to": hits[0], "resolved_via": "name_fallback"}
+        if hits:
+            return {"resolved_to": None, "resolved_via": "name_fallback",
+                    "ambiguous_candidates": hits}
+        return {"resolved_to": None, "resolved_via": None}
+
     def _resolve_external_ref(self, source_file, ref_name):
-        """Try to resolve an external file reference name to a known file."""
-        known_files = {f.source_file for f in self.files}
+        """Resolve an external file reference to a parsed file name, or None."""
+        return self.resolve_external_ref_info(source_file, ref_name)["resolved_to"]
 
-        # Direct match
-        if ref_name in known_files:
-            return ref_name
-
-        # Via EDS map
-        resolved = self._eds_map.get((source_file, ref_name))
-        if resolved:
-            return resolved
-
-        # Case-insensitive / extensionless match
-        for kf in known_files:
-            kf_base = os.path.splitext(kf)[0]
-            if ref_name == kf_base or ref_name.lower() == kf_base.lower():
-                return kf
-
-        return None  # Unresolved
+    @staticmethod
+    def _unresolved_detail(info):
+        if info.get("ambiguous_candidates"):
+            return "ambiguous, matches " + ", ".join(info["ambiguous_candidates"])
+        return "DDR not found"
 
     def merge_topology(self):
         """Produce the 00_topology.json with file inventory and cross-file refs."""
@@ -1271,22 +1340,27 @@ class DDRMerger:
             for to in ddr.table_occurrences:
                 if "external_file_reference" in to:
                     ref_name = to["external_file_reference"]["name"]
-                    resolved = self._resolve_external_ref(ddr.source_file, ref_name)
+                    info = self.resolve_external_ref_info(ddr.source_file, ref_name)
+                    resolved = info["resolved_to"]
                     entry = {
                         "from_file": ddr.source_file,
                         "to_name": to["name"],
                         "base_table": to.get("base_table"),
                         "external_ref": ref_name,
-                        "resolved_to": resolved,
+                        **info,
                     }
                     cross_file_tos.append(entry)
                     if resolved is None:
-                        unresolved_refs.append({
+                        unresolved = {
                             "type": "table_occurrence",
                             "from_file": ddr.source_file,
                             "reference": ref_name,
-                            "context": f"TO '{to['name']}' references file '{ref_name}'",
-                        })
+                            "context": f"TO '{to['name']}' references file '{ref_name}'"
+                                       f" — {self._unresolved_detail(info)}",
+                        }
+                        if info.get("ambiguous_candidates"):
+                            unresolved["ambiguous_candidates"] = info["ambiguous_candidates"]
+                        unresolved_refs.append(unresolved)
 
             # Track cross-file script calls
             for script in ddr.scripts:
@@ -1316,14 +1390,22 @@ class DDRMerger:
             for eds in ddr.external_data_sources:
                 if eds["type"] == "filemaker":
                     eds_name = eds["name"]
-                    resolved = self._resolve_external_ref(ddr.source_file, eds_name)
-                    if resolved is None and eds_name not in known_files:
-                        unresolved_refs.append({
+                    info = self.resolve_external_ref_info(ddr.source_file, eds_name)
+                    eds.update(info)  # files_info holds this same dict
+                    if info["resolved_to"] is None:
+                        unresolved = {
                             "type": "external_data_source",
                             "from_file": ddr.source_file,
                             "reference": eds_name,
-                            "context": f"External data source '{eds_name}' — DDR not found",
-                        })
+                            "context": f"External data source '{eds_name}'"
+                                       f" — {self._unresolved_detail(info)}",
+                        }
+                        if info.get("ambiguous_candidates"):
+                            unresolved["ambiguous_candidates"] = info["ambiguous_candidates"]
+                        unresolved_refs.append(unresolved)
+                    elif info["resolved_via"] == "name_fallback" and eds.get("paths"):
+                        print(f"  NOTE: data source '{eds_name}' in {ddr.source_file}: no path"
+                              f" matched a parsed file; resolved by name to {info['resolved_to']}")
 
         topology = {
             "multi_file": self.multi_file,

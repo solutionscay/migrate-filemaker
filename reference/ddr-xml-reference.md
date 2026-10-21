@@ -173,7 +173,7 @@ In multi-file solutions, a table occurrence can reference a base table in a diff
 </Table>
 ```
 
-The `FileReference` `name` attribute is the symbolic name of the external file (as defined in the External Data Sources). The parser records this as `external_file_reference` and attempts to resolve it to a known parsed file via the EDS map.
+The `FileReference` `name` attribute is the name of an external data source, not a file name. The parser records it as `external_file_reference` and resolves it through that data source's `pathList` (see "Cross-file resolution" under External Data Sources).
 
 ## Relationships
 
@@ -520,18 +520,15 @@ This catalog lists references to other files or databases that the current FM fi
 
 ```xml
 <ExternalDataSourcesCatalog>
-  <FileReference id="2" name="DataFile">
-    <PathList>
-      <Path>file:DataFile</Path>
-      <Path>file:/Volumes/Server/DataFile.fmp12</Path>
-    </PathList>
-  </FileReference>
+  <FileReference id="1" pathList="file:Mini_Schema" name="Mini_Schema" />
 </ExternalDataSourcesCatalog>
 ```
 
-- `name`: The symbolic name used elsewhere in the DDR (in table occurrences and script steps) to reference this file
+- `name`: The data source's alias. Table occurrences and script steps refer to the data source by this name. It is **not** a file name: a data source named `Backend` can point at `Data.fmp12`.
 - `id`: Internal FM identifier
-- `PathList > Path`: Ordered list of file paths FM tries when opening the reference. May include `file:`, `fmnet:/`, or absolute paths.
+- `pathList`: An attribute (not a child element) that holds the targets FM tries, in order, when it opens the reference. Entries use a scheme prefix: `file:`, `fmnet:/`, `filemac:/`, `filewin:/`. The parser emits them as `paths`.
+
+Evidence: `tests/fixtures/mini_ddr.xml` carries the attribute shape with one entry. How a real DDR separates several entries inside the one attribute is not yet confirmed against a real multi-file DDR. The parser splits on line breaks, and on whitespace that is followed by a scheme prefix, so a file name with a space stays whole. Older versions of this doc showed `PathList > Path` children; the parser still reads them if present, but no real DDR has shown that shape.
 
 ### OdbcDataSource entries (external non-FM databases)
 
@@ -545,10 +542,13 @@ ODBC sources indicate the FM solution connects to an external SQL database. Thes
 
 ### Cross-file resolution
 
-The parser uses External Data Source names to resolve cross-file references:
-1. Table occurrences with `<FileReference>` child → `external_file_reference` field
-2. Perform Script steps with `<FileReference>` child → `external_file` param
-3. The merger maps symbolic names to actual parsed files via name matching
+Table occurrences (`external_file_reference`) and Perform Script steps (`external_file` param) name a data source, not a file. The merger resolves each data source of each file like this:
+
+1. Try each `paths` entry in order. Take the file name after the last `/` (`fmnet:/*/Data` → `Data`) and match it to a parsed file: exact file name, then the name without its FM extension, then the same case-insensitively. The first entry that matches wins (`resolved_via: "path"`, `matched_path`).
+2. Only when no path entry matches, match the data-source name the same way (`resolved_via: "name_fallback"`).
+3. When one tier matches more than one parsed file (for example `Data.fmp12` and `data.fp7` for `DATA`), the reference is left unresolved and listed with `ambiguous_candidates` in `unresolved_references`. The parser never picks one, and candidates are listed in sorted order so the output does not depend on `PYTHONHASHSEED`.
+
+Each FileMaker data source in `00_topology.json` carries `resolved_to` and `resolved_via` (`null` when unresolved).
 
 ## FileMaker Naming Conventions (informational)
 
