@@ -441,6 +441,23 @@ Check</Text>
 
 When `ShowRelated value="True"`, the list filters to records related through a specific table occurrence.
 
+The parser adds `primary_table_source_file`: the file of the base table behind `primary_table` (an occurrence name). It is null when the occurrence is external and unresolved.
+
+### Values from another file (real shape, FileMaker 22)
+```xml
+<ValueList id="1" name="Stages">
+  <Source value="External"/>
+  <External>
+    <FileReference id="1" name="Backend">
+      <UniversalPathList>file:Data</UniversalPathList>
+    </FileReference>
+    <ValueList id="3" name="Stage Values"/>
+  </External>
+</ValueList>
+```
+
+The `FileReference` id and name match an entry of the file's `ExternalDataSourcesCatalog`. The path is the text of `UniversalPathList`, not a `pathList` attribute. The inner `ValueList` is the list in the other file. Emitted as `type: "external"` with `external_file_reference`, `external_paths`, `external_value_list` and `resolved_source_file`. Any other unknown source is emitted with its source as `type` and a warning, never bare.
+
 ## Security
 
 ### Accounts
@@ -518,20 +535,19 @@ This catalog lists references to other files or databases that the current FM fi
 
 ### FileReference entries (other FileMaker files)
 
+FileMaker 22 writes the path list as an ATTRIBUTE. In real multi-file DDRs no catalog entry had a `PathList` child:
+
 ```xml
 <ExternalDataSourcesCatalog>
-  <FileReference id="2" name="DataFile">
-    <PathList>
-      <Path>file:DataFile</Path>
-      <Path>file:/Volumes/Server/DataFile.fmp12</Path>
-    </PathList>
-  </FileReference>
+  <FileReference id="1" pathList="file:Data" name="Backend" />
+  <FileReference id="2" link="1" pathList="fmnet:/host.example/Archive.fmp12" name="Archive" />
 </ExternalDataSourcesCatalog>
 ```
 
-- `name`: The symbolic name used elsewhere in the DDR (in table occurrences and script steps) to reference this file
-- `id`: Internal FM identifier
-- `PathList > Path`: Ordered list of file paths FM tries when opening the reference. May include `file:`, `fmnet:/`, or absolute paths.
+- `name`: the data source's NAME, an alias chosen by the developer. It is used elsewhere in the DDR (table occurrences, script steps, buttons, value lists) to point at this entry. It is **not** a file name: `Backend` above opens `Data`.
+- `id`: internal FM identifier
+- `pathList`: the paths FM tries, in order. Seen forms: `file:<name>`, `fmnet:/<host>/<name>.fmp12`, and an entry with no scheme. The parser reads the attribute, a `PathList > Path` child list (older documentation shows this shape) and the `UniversalPathList` text of a value list (below) through one helper, `reference_paths()`.
+- `link`: present on some entries; meaning not documented.
 
 ### OdbcDataSource entries (external non-FM databases)
 
@@ -545,10 +561,13 @@ ODBC sources indicate the FM solution connects to an external SQL database. Thes
 
 ### Cross-file resolution
 
-The parser uses External Data Source names to resolve cross-file references:
+References name a data source; the data source's path names the file:
 1. Table occurrences with `<FileReference>` child → `external_file_reference` field
-2. Perform Script steps with `<FileReference>` child → `external_file` param
-3. The merger maps symbolic names to actual parsed files via name matching
+2. Script steps and buttons with a `<FileReference>` child (a sibling of `<Script>`) → `external_file`
+3. Value lists with `Source value="External"` → `external_file_reference` (see Value Lists)
+4. The merger resolves each data source through its path (the last segment, without the extension and the scheme or host), in the order FileMaker tries the paths. The name is used only when the entry has no path; `resolved_by` says which (`path` or `name`).
+5. Matching is exact first, then case-insensitive without extension, over the sorted file list. A reference that matches more than one parsed file stays unresolved and is listed in `00_topology.json` `ambiguous_references`.
+6. External table occurrences carry `external: true` and `resolved_source_file` (null with `unresolved: true` when the target file is not in the parse). Their `base_table_id` is an id in the OTHER file: never join it to the occurrence's own `source_file`.
 
 ## FileMaker Naming Conventions (informational)
 

@@ -39,6 +39,8 @@ Do not test `field_type == "Container"` or `operator == "="`; those literals do 
 
 Resolve every relationship side through `02_table_occurrences.json` using source-file context, occurrence id/name, `base_table`, `base_table_id`, and `resolved_source_file`.
 
+An occurrence with `external: true` is based on a table in another file: join (`resolved_source_file`, `base_table_id`), never (`source_file`, `base_table_id`). When `resolved_source_file` is null (`unresolved: true`), the base table is in a file that is not in the parse. Record it as unresolved; do not fall back to a local table with the same id.
+
 For every predicate, retain:
 
 ```text

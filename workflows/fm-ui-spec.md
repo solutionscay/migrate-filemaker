@@ -40,7 +40,7 @@ For every implementation-critical layout, extract or manually record:
 source_file,layout_id,layout_name,object_key,object_type,parent/container_path,bounds,label,field_or_portal,control_type,value_list,button_action,trigger,hide_rule_ids,cf_rule_ids
 ```
 
-Use raw XML ids/object keys when emitted. If no stable key exists, combine source file, layout id, object type, bounds, and container path, then label the identity `derived` and verify it against a screenshot. Never join hide/CF rules to an object by array position.
+Use raw XML ids/object keys when emitted. If no stable key exists, combine source file, layout id, object type, bounds, and container path, then label the identity `derived` and verify it against a screenshot. Never join hide/CF rules to an object by array position. Each rule in `09_conditional_formatting.json` and `10_hide_object_when.json` carries `layout_id`; group rules by (`source_file`, `layout_id`), not by layout name, because layout names can repeat within a file.
 
 Record unnamed/unattributed hide and CF rules separately until this mapping is proven.
 

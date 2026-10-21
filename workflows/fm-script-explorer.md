@@ -21,7 +21,7 @@ python3 "$SKILL_DIR/scripts/catalog_contract.py" snapshot \
   --kind scripts --spec "$SPEC_FILE" --output "$CATALOG"
 ```
 
-The empty/root group is `_root.csv`; do not normalize it to `.csv`. Use each catalog entry's `output_file` exactly. Do not glob the explorer root: classification CSVs live only under `catalogs/`.
+The empty/root group is `_root.csv` in a one-file spec, and `_root--<hash>.csv` for each file in a multi-file spec; do not normalize it to `.csv`. Use each catalog entry's `output_file` exactly. Do not glob the explorer root: classification CSVs live only under `catalogs/`.
 
 ## Classification record
 
@@ -60,7 +60,7 @@ Do not hard-filter "plumbing" before scoring. Navigation-like names are weak evi
 
 After individual classification:
 
-- Resolve `Perform Script` calls by source file and definition id/name; label unresolved external calls.
+- Resolve `Perform Script` calls by source file and definition id/name; label unresolved external calls. Step and button references carry `script_id`; FileMaker allows duplicate script names, and some references carry an id and no name. `00_topology.json` `script_calls` lists cross-file calls from script steps (`via: "script_step"`, with the caller's `script_id` and `step_line`) and from buttons (`via: "button"`, with `layout_id`).
 - Identify strongly connected call groups and dispatcher parameter contracts.
 - Trace each tier1 write back through its callers and forward to affected fields/tables.
 - Record whether transaction and error-handling behavior spans called scripts.

@@ -38,7 +38,7 @@ The catalog records:
 - the original index for lookup only;
 - a collision-resistant output filename.
 
-For the root script group, the output filename is explicitly `_root.csv`. Other group/layout/table names include a hash suffix so normalized-name collisions do not merge unrelated sources.
+For the root script group, the output filename is explicitly `_root.csv`. Other group/layout/table names include a hash suffix so normalized-name collisions do not merge unrelated sources. In a multi-file spec the source file is part of that hash for every group, so same-named groups in different files get different files; the root group of each file is then `_root--<hash>.csv`.
 
 If `snapshot` reports that the source changed, stop. Archive or delete the stale classification directory, recreate the catalog with `--force`, and reclassify. Do not carry rows forward by index. A manual carry-forward is allowed only after matching `source_id` and verifying `source_hash`; record that operation.
 
