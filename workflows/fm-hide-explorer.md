@@ -20,7 +20,7 @@ python3 "$SKILL_DIR/scripts/catalog_contract.py" snapshot \
 ## Classification record
 
 ```text
-source_id,source_hash,index,source_file,layout,object_name,object_type,attribution,category,security_relation,dependencies,meaning,migration_target,uncertainty
+source_id,source_hash,index,source_file,layout_id,layout,object_name,object_type,attribution,category,security_relation,dependencies,meaning,migration_target,uncertainty
 ```
 
 - `attribution` is `named-context-only`, `stable-object`, or `unattributed`. With the current emitted schema, most records cannot qualify as `stable-object` because no object key/bounds/container path is present.
@@ -44,7 +44,7 @@ For each rule:
 Retain every row. The same expression can hide different controls on different layouts and therefore have different user-facing consequences.
 
 - Group formulas for analysis only.
-- Preserve source file, layout, object attribution, and proposed target for every occurrence.
+- Preserve source file, layout id and name, object attribution, and proposed target for every occurrence.
 - Never inherit a migration target from the first exact-formula match.
 
 ## Completion and reports

@@ -353,6 +353,7 @@ EXPECTED_CONDITIONAL_FORMATTING = [
         "formula": "Intakes::Juvenile_boolean",
         "format_css": "self:normal .self { color: rgba(85.098%,4.31373%,0%,1); }",
         "layout": "Intake Detail",
+        "layout_id": "11",
         "source_file": SRC,
     }
 ]
@@ -367,6 +368,7 @@ EXPECTED_HIDE_CONDITIONS = [
         # author-ownership check.
         "formula": "Get ( AccountName ) ≠ Case_Notes::log_created_account",
         "layout": "Intake Detail",
+        "layout_id": "11",
         "source_file": SRC,
     },
     {
@@ -375,6 +377,7 @@ EXPECTED_HIDE_CONDITIONS = [
         # Produced by the chunk-walker fallback, not by <Calculation> text.
         "formula": "IsEmpty ( LINE_ITEMS_Restitution::Balance_Due )",
         "layout": "Restitution Report",
+        "layout_id": "12",
         "source_file": SRC,
     },
 ]
@@ -907,6 +910,29 @@ class CrossFileScriptCallTest(unittest.TestCase):
                       if r["type"] == "script_call"]
         self.assertEqual(len(unresolved), 1)
         self.assertEqual((unresolved[0]["origin"], unresolved[0]["reference"]), ("button", "Gone"))
+
+
+
+class DuplicateSourceFileTests(unittest.TestCase):
+    """Two inputs with one DDR `File name` would mix their ids. Stop instead."""
+
+    def test_same_file_name_in_two_inputs_stops_and_names_both(self):
+        a = parse_ddr.DDRFile(FIXTURE)
+        b = parse_ddr.DDRFile(FIXTURE)
+        b.filepath = "/elsewhere/old_export.xml"
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as caught:
+            parse_ddr.check_unique_source_files([a, b])
+        self.assertEqual(caught.exception.code, 1)
+        self.assertIn("Mini.fmp12", err.getvalue())
+        self.assertIn(FIXTURE, err.getvalue())
+        self.assertIn("/elsewhere/old_export.xml", err.getvalue())
+
+    def test_distinct_file_names_pass(self):
+        a = parse_ddr.DDRFile(FIXTURE)
+        b = parse_ddr.DDRFile(FIXTURE)
+        b.source_file = "Other.fmp12"
+        parse_ddr.check_unique_source_files([a, b])
 
 
 if __name__ == "__main__":

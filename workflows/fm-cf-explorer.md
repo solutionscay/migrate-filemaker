@@ -22,7 +22,7 @@ The emitted schema uses `format_css`, not `format_actions`. Treat unknown `condi
 ## Classification record
 
 ```text
-source_id,source_hash,index,source_file,layout,object_name,object_type,attribution,condition_type,flags,formula_hash,format_hash,category,meaning,visual_effect,migration_target,uncertainty
+source_id,source_hash,index,source_file,layout_id,layout,object_name,object_type,attribution,condition_type,flags,formula_hash,format_hash,category,meaning,visual_effect,migration_target,uncertainty
 ```
 
 Do not copy credential-like literals from formulas. Hashes in the CSV are traceability aids; interpret the full source values in memory.

@@ -21,7 +21,7 @@ python3 "$SKILL_DIR/scripts/catalog_contract.py" snapshot \
   --kind scripts --spec "$SPEC_FILE" --output "$CATALOG"
 ```
 
-The empty/root group is `_root.csv`; do not normalize it to `.csv`. Use each catalog entry's `output_file` exactly. Do not glob the explorer root: classification CSVs live only under `catalogs/`.
+Each `output_file` is `<source-file>--<hash>/<group-file>`. The empty/root group of each source file is `<source-file>--<hash>/_root.csv`; do not normalize it to `.csv`. Use each catalog entry's `output_file` exactly and create its folder. Do not glob the explorer root: classification CSVs live only under `catalogs/`.
 
 ## Classification record
 
