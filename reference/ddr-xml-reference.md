@@ -428,6 +428,9 @@ row in `00_topology.json` → `cross_file_references.script_calls`:
 | `calls_script`, `calls_script_id` | Target script name and id in the target file |
 | `external_ref` | `FileReference` name (External Data Source) |
 | `resolved_to` | Parsed file the reference resolves to, or `null` (also listed in `unresolved_references` with the same `origin`) |
+| `resolved_via` | `path`, `name_fallback`, or `null` when nothing matched (see "Cross-file resolution") |
+| `matched_path` | The `pathList` entry that matched (`path` rows only) |
+| `ambiguous_candidates` | Sorted parsed files that all match; present only when the call is ambiguous, and then `resolved_to` is `null` |
 
 ## Value Lists
 
@@ -570,7 +573,7 @@ Table occurrences (`external_file_reference`), Perform Script steps (`external_f
 2. Only when no path entry matches, match the data-source name the same way (`resolved_via: "name_fallback"`).
 3. When one tier matches more than one parsed file (for example `Data.fmp12` and `data.fp7` for `DATA`), the reference is left unresolved and listed with `ambiguous_candidates` in `unresolved_references`. The parser never picks one, and candidates are listed in sorted order so the output does not depend on `PYTHONHASHSEED`.
 
-Each FileMaker data source in `00_topology.json` carries `resolved_to` and `resolved_via` (`null` when unresolved). In `02_table_occurrences.json` every external occurrence carries `external: true`, `resolved_source_file` (`null` when unresolved), `resolved_via`, and `unresolved: true` when it did not resolve. Its `base_table_id` belongs to the other file. Never join it against `source_file`.
+Each FileMaker data source in `00_topology.json` carries `resolved_to` and `resolved_via` (`null` when unresolved). So does each `cross_file_references` row (table occurrences and script calls), with `matched_path` and `ambiguous_candidates` when they apply. In `02_table_occurrences.json` every external occurrence carries `external: true`, `resolved_source_file` (`null` when unresolved), `resolved_via`, and `unresolved: true` when it did not resolve. Its `base_table_id` belongs to the other file. Never join it against `source_file`.
 
 ## FileMaker Naming Conventions (informational)
 

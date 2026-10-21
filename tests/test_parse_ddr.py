@@ -891,6 +891,7 @@ class CrossFileScriptCallTest(unittest.TestCase):
             "script": "Go", "script_id": "3", "step": "Perform Script", "step_id": "4",
             "calls_script": "Save", "calls_script_id": "21",
             "external_ref": "Backend", "resolved_to": "Backend.fmp12",
+            "resolved_via": "path", "matched_path": "file:Backend",
         })
 
     def test_button_call_row_is_marked_and_resolved_like_a_step(self):
@@ -902,6 +903,7 @@ class CrossFileScriptCallTest(unittest.TestCase):
             "calls_script": "Save", "calls_script_id": "22",
             "external_ref": "Backend",
             "resolved_to": self.merger._resolve_external_ref("UI.fmp12", "Backend"),
+            "resolved_via": "path", "matched_path": "file:Backend",
         })
         self.assertEqual(row["resolved_to"], "Backend.fmp12")
 
@@ -910,6 +912,27 @@ class CrossFileScriptCallTest(unittest.TestCase):
                       if r["type"] == "script_call"]
         self.assertEqual(len(unresolved), 1)
         self.assertEqual((unresolved[0]["origin"], unresolved[0]["reference"]), ("button", "Gone"))
+
+    def test_ambiguous_script_call_carries_its_candidates(self):
+        """A second parsed file with the same name and another FM extension
+        (Backend.fp7) makes Backend ambiguous. The step row and the button row
+        both name the candidates instead of picking one."""
+        twin = _StubFile("Backend.fp7")
+        twin.filepath = "Backend.xml"
+        twin.tables = twin.relationships = twin.layouts = twin.scripts = []
+        twin.value_lists = twin.custom_functions = []
+        twin.conditional_formatting = twin.hide_conditions = []
+        with contextlib.redirect_stdout(io.StringIO()):
+            topology = parse_ddr.DDRMerger(self.files + [twin]).merge_topology()
+        rows = [c for c in topology["cross_file_references"]["script_calls"]
+                if c["external_ref"] == "Backend"]
+        self.assertEqual({c["origin"] for c in rows}, {"script_step", "button"})
+        for row in rows:
+            self.assertIsNone(row["resolved_to"])
+            self.assertEqual(row["ambiguous_candidates"], ["Backend.fmp12", "Backend.fp7"])
+        flagged = [r for r in topology["unresolved_references"]
+                   if r["type"] == "script_call" and r.get("ambiguous_candidates")]
+        self.assertEqual(len(flagged), len(rows))
 
 
 

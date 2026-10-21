@@ -1351,14 +1351,19 @@ class DDRMerger:
             return "ambiguous, matches " + ", ".join(info["ambiguous_candidates"])
         return "DDR not found"
 
+    def _unresolved_ref(self, info, context, **fields):
+        """An unresolved_references row: the context names why it failed."""
+        row = dict(fields, context=f"{context} — {self._unresolved_detail(info)}")
+        if info.get("ambiguous_candidates"):
+            row["ambiguous_candidates"] = info["ambiguous_candidates"]
+        return row
+
     def merge_topology(self):
         """Produce the 00_topology.json with file inventory and cross-file refs."""
         files_info = []
         cross_file_tos = []
         cross_file_scripts = []
         unresolved_refs = []
-
-        known_files = {f.source_file for f in self.files}
 
         for ddr in self.files:
             info = {
@@ -1395,16 +1400,13 @@ class DDRMerger:
                     }
                     cross_file_tos.append(entry)
                     if resolved is None:
-                        unresolved = {
-                            "type": "table_occurrence",
-                            "from_file": ddr.source_file,
-                            "reference": ref_name,
-                            "context": f"TO '{to['name']}' references file '{ref_name}'"
-                                       f" — {self._unresolved_detail(info)}",
-                        }
-                        if info.get("ambiguous_candidates"):
-                            unresolved["ambiguous_candidates"] = info["ambiguous_candidates"]
-                        unresolved_refs.append(unresolved)
+                        unresolved_refs.append(self._unresolved_ref(
+                            info,
+                            f"TO '{to['name']}' references file '{ref_name}'",
+                            type="table_occurrence",
+                            from_file=ddr.source_file,
+                            reference=ref_name,
+                        ))
 
             # Track cross-file script calls. `origin` tells a script step call
             # from a button call; ids are kept because script names repeat.
@@ -1413,7 +1415,7 @@ class DDRMerger:
                     params = step.get("params", {})
                     if "external_file" in params:
                         ext_file = params["external_file"]
-                        resolved = self._resolve_external_ref(ddr.source_file, ext_file)
+                        info = self.resolve_external_ref_info(ddr.source_file, ext_file)
                         entry = {
                             "origin": "script_step",
                             "from_file": ddr.source_file,
@@ -1424,24 +1426,25 @@ class DDRMerger:
                             "calls_script": params.get("script", ""),
                             "calls_script_id": params.get("script_id"),
                             "external_ref": ext_file,
-                            "resolved_to": resolved,
+                            **info,
                         }
                         cross_file_scripts.append(entry)
-                        if resolved is None:
-                            unresolved_refs.append({
-                                "type": "script_call",
-                                "origin": "script_step",
-                                "from_file": ddr.source_file,
-                                "reference": ext_file,
-                                "context": f"Script '{script['name']}' calls script in file '{ext_file}'",
-                            })
+                        if info["resolved_to"] is None:
+                            unresolved_refs.append(self._unresolved_ref(
+                                info,
+                                f"Script '{script['name']}' calls script in file '{ext_file}'",
+                                type="script_call",
+                                origin="script_step",
+                                from_file=ddr.source_file,
+                                reference=ext_file,
+                            ))
 
             for layout in ddr.layouts:
                 for button in layout.get("buttons", []):
                     if "external_file" not in button:
                         continue
                     ext_file = button["external_file"]
-                    resolved = self._resolve_external_ref(ddr.source_file, ext_file)
+                    info = self.resolve_external_ref_info(ddr.source_file, ext_file)
                     entry = {
                         "origin": "button",
                         "from_file": ddr.source_file,
@@ -1454,17 +1457,18 @@ class DDRMerger:
                         "calls_script": button.get("script", ""),
                         "calls_script_id": button.get("script_id"),
                         "external_ref": ext_file,
-                        "resolved_to": resolved,
+                        **info,
                     }
                     cross_file_scripts.append(entry)
-                    if resolved is None:
-                        unresolved_refs.append({
-                            "type": "script_call",
-                            "origin": "button",
-                            "from_file": ddr.source_file,
-                            "reference": ext_file,
-                            "context": f"Button on layout '{layout.get('name')}' calls script in file '{ext_file}'",
-                        })
+                    if info["resolved_to"] is None:
+                        unresolved_refs.append(self._unresolved_ref(
+                            info,
+                            f"Button on layout '{layout.get('name')}' calls script in file '{ext_file}'",
+                            type="script_call",
+                            origin="button",
+                            from_file=ddr.source_file,
+                            reference=ext_file,
+                        ))
 
             # Check EDS references to files not in our set
             for eds in ddr.external_data_sources:
@@ -1473,16 +1477,13 @@ class DDRMerger:
                     info = self.resolve_external_ref_info(ddr.source_file, eds_name)
                     eds.update(info)  # files_info holds this same dict
                     if info["resolved_to"] is None:
-                        unresolved = {
-                            "type": "external_data_source",
-                            "from_file": ddr.source_file,
-                            "reference": eds_name,
-                            "context": f"External data source '{eds_name}'"
-                                       f" — {self._unresolved_detail(info)}",
-                        }
-                        if info.get("ambiguous_candidates"):
-                            unresolved["ambiguous_candidates"] = info["ambiguous_candidates"]
-                        unresolved_refs.append(unresolved)
+                        unresolved_refs.append(self._unresolved_ref(
+                            info,
+                            f"External data source '{eds_name}'",
+                            type="external_data_source",
+                            from_file=ddr.source_file,
+                            reference=eds_name,
+                        ))
                     elif info["resolved_via"] == "name_fallback" and eds.get("paths"):
                         print(f"  NOTE: data source '{eds_name}' in {ddr.source_file}: no path"
                               f" matched a parsed file; resolved by name to {info['resolved_to']}")
