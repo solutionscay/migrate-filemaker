@@ -7,6 +7,8 @@ python3 -m unittest discover -s tests -v
 Stdlib only. `parse_ddr.py` has no dependencies and must keep none.
 
 - `fixtures/mini_ddr.xml` — a hand-authored FMPReport, UTF-16 LE, ~370 lines.
+- `fixtures/two_file/` — two tiny DDRs (`UI.xml` calls scripts in `Backend.xml`
+  from a script step and from buttons) for cross-file script calls.
 - `test_parse_ddr.py` — runs the real parser over it and asserts the output exactly.
 - `test_skill_contract.py` — guards provenance, stable explorer identities, root
   script filenames, exact-set coverage, supported skill metadata, and repaired

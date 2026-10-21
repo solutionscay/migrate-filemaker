@@ -134,11 +134,13 @@ EXPECTED_LAYOUTS = [
         "buttons": [
             # A plain ButtonObj -- ignored outright by the original parser.
             {"action": "Perform Script", "button_type": "ButtonObj",
-             "script": "Send Officer Dispositions",
+             "object_key": "2",
+             "script": "Send Officer Dispositions", "script_id": "79",
              "description": "Perform Script [ “Send Officer Dispositions” ]"},
             # A GroupButtonObj container whose Step is one level deeper.
             {"action": "Perform Script", "button_type": "GroupButtonObj",
-             "script": "Set is_Closed from GJ Status",
+             "object_key": "3",
+             "script": "Set is_Closed from GJ Status", "script_id": "1539",
              "description": "Perform Script [ “Set is_Closed from GJ Status” ]"},
         ],
         "source_file": SRC,
@@ -167,7 +169,7 @@ EXPECTED_SCRIPTS = [
         "steps": [
             {"id": "1", "name": "Perform Script", "enable": "True",
              "step_text": "Perform Script [ “Set User Information at Login” ]",
-             "params": {"script": "Set User Information at Login"}},
+             "params": {"script": "Set User Information at Login", "script_id": "794"}},
             # REDACTION: the keyword sits in the VARIABLE NAME, not in the value.
             # <Value> is bare ("hunter2-should-not-ship"), so keyword-adjacency
             # alone cannot see it -- looks_like_secret_target must catch it via
@@ -351,6 +353,7 @@ EXPECTED_CONDITIONAL_FORMATTING = [
         "formula": "Intakes::Juvenile_boolean",
         "format_css": "self:normal .self { color: rgba(85.098%,4.31373%,0%,1); }",
         "layout": "Intake Detail",
+        "layout_id": "11",
         "source_file": SRC,
     }
 ]
@@ -365,6 +368,7 @@ EXPECTED_HIDE_CONDITIONS = [
         # author-ownership check.
         "formula": "Get ( AccountName ) ≠ Case_Notes::log_created_account",
         "layout": "Intake Detail",
+        "layout_id": "11",
         "source_file": SRC,
     },
     {
@@ -373,6 +377,7 @@ EXPECTED_HIDE_CONDITIONS = [
         # Produced by the chunk-walker fallback, not by <Calculation> text.
         "formula": "IsEmpty ( LINE_ITEMS_Restitution::Balance_Due )",
         "layout": "Restitution Report",
+        "layout_id": "12",
         "source_file": SRC,
     },
 ]
@@ -754,6 +759,180 @@ class MultiFileSecurityMergeTest(unittest.TestCase):
         self.assertEqual(p["attrs_by_file"][self.DATA]["printing"], "True")
         self.assertEqual(p["access_source_file"], self.UI)
         self.assertEqual(p["printing"], "False")
+
+
+class _StubFile:
+    """The slice of DDRFile that external-reference resolution reads."""
+
+    def __init__(self, source_file, sources=(), occurrences=()):
+        self.source_file = source_file
+        self.external_data_sources = [
+            dict(type="filemaker", id=str(i), source_file=source_file, **s)
+            for i, s in enumerate(sources, 1)]
+        self.table_occurrences = [dict(o, source_file=source_file) for o in occurrences]
+
+
+def _ext_to(name, ref):
+    return {"id": "1", "name": name, "base_table": name, "base_table_id": "1",
+            "external_file_reference": {"name": ref, "id": "1"}}
+
+
+class ExternalReferenceResolutionTest(unittest.TestCase):
+    """Issues #2, #5, #3: references resolved by the data-source alias, in set
+    order, and an unresolved external TO looked like a local one."""
+
+    def test_fixture_pathList_attribute_is_read(self):
+        ddr, _, _, _ = parse_fixture()
+        self.assertEqual(ddr.external_data_sources[0]["paths"], ["file:Mini_Schema"])
+
+    def test_pathList_entries_split_without_breaking_spaced_names(self):
+        self.assertEqual(
+            parse_ddr.split_path_list("file:My Data fmnet:/*/My Data\nfilemac:/HD/x/Data.fmp12"),
+            ["file:My Data", "fmnet:/*/My Data", "filemac:/HD/x/Data.fmp12"])
+        self.assertEqual(parse_ddr.path_target_name("fmnet:/*/My Data"), "My Data")
+
+    def test_alias_resolves_through_its_path(self):
+        ui = _StubFile("UI.fmp12", [{"name": "Backend", "paths": ["file:Data"]}])
+        m = parse_ddr.DDRMerger([ui, _StubFile("Data.fmp12")])
+        self.assertEqual(m._resolve_external_ref("UI.fmp12", "Backend"), "Data.fmp12")
+        self.assertEqual(m.resolve_external_ref_info("UI.fmp12", "Backend")["resolved_via"], "path")
+
+    def test_path_beats_a_file_with_the_alias_name(self):
+        ui = _StubFile("UI.fmp12", [{"name": "Data", "paths": ["file:Archive"]}])
+        m = parse_ddr.DDRMerger([ui, _StubFile("Data.fmp12"), _StubFile("Archive.fmp12")])
+        self.assertEqual(m._resolve_external_ref("UI.fmp12", "Data"), "Archive.fmp12")
+
+    def test_later_path_entry_is_tried_when_the_first_does_not_match(self):
+        ui = _StubFile("UI.fmp12", [{"name": "B", "paths": ["file:Gone", "fmnet:/*/Data"]}])
+        m = parse_ddr.DDRMerger([ui, _StubFile("Data.fmp12")])
+        self.assertEqual(m._resolve_external_ref("UI.fmp12", "B"), "Data.fmp12")
+
+    def test_name_fallback_is_marked(self):
+        ui = _StubFile("UI.fmp12", [{"name": "Data", "paths": ["file:Gone"]}])
+        m = parse_ddr.DDRMerger([ui, _StubFile("Data.fmp12")])
+        self.assertEqual(m.resolve_external_ref_info("UI.fmp12", "Data"),
+                         {"resolved_to": "Data.fmp12", "resolved_via": "name_fallback"})
+
+    def test_ambiguous_match_is_reported_not_picked(self):
+        ui = _StubFile("UI.fmp12", [{"name": "X", "paths": ["file:DATA"]}])
+        m = parse_ddr.DDRMerger([ui, _StubFile("data.fp7"), _StubFile("Data.fmp12")])
+        info = m.resolve_external_ref_info("UI.fmp12", "X")
+        self.assertIsNone(info["resolved_to"])
+        self.assertEqual(info["ambiguous_candidates"], ["Data.fmp12", "data.fp7"])
+
+    def test_resolution_does_not_depend_on_hash_seed(self):
+        import subprocess
+        code = ("import sys; sys.path.insert(0, %r); sys.path.insert(0, %r); "
+                "import parse_ddr, test_parse_ddr as t; "
+                "m = parse_ddr.DDRMerger([t._StubFile('UI.fmp12', [{'name': 'DATA'}]), "
+                "t._StubFile('Data.fmp12'), t._StubFile('data.fp7')]); "
+                "print(m.resolve_external_ref_info('UI.fmp12', 'DATA'))"
+                % (os.path.dirname(parse_ddr.__file__), os.path.dirname(os.path.abspath(__file__))))
+        outs = {subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                               env=dict(os.environ, PYTHONHASHSEED=str(seed))).stdout
+                for seed in range(1, 7)}
+        self.assertEqual(len(outs), 1, outs)
+        self.assertIn("ambiguous_candidates", outs.pop())
+
+    def test_unresolved_external_to_is_marked(self):
+        ui = _StubFile("UI.fmp12", [{"name": "Gone", "paths": ["file:Gone"]}],
+                       [_ext_to("Contacts", "Gone")])
+        to = parse_ddr.DDRMerger([ui]).merge_table_occurrences()[0]
+        self.assertEqual((to["external"], to["resolved_source_file"], to["unresolved"]),
+                         (True, None, True))
+
+    def test_resolved_external_to_is_marked(self):
+        ui = _StubFile("UI.fmp12", [{"name": "Backend", "paths": ["file:Data"]}],
+                       [_ext_to("Contacts", "Backend")])
+        to = parse_ddr.DDRMerger([ui, _StubFile("Data.fmp12")]).merge_table_occurrences()[0]
+        self.assertEqual((to["external"], to["resolved_source_file"], to["resolved_via"]),
+                         (True, "Data.fmp12", "path"))
+        self.assertNotIn("unresolved", to)
+
+
+TWO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "two_file")
+
+
+class CrossFileScriptCallTest(unittest.TestCase):
+    """UI.fmp12 calls Save in Backend.fmp12 from a script step and from a
+    button. Backend.fmp12 has two scripts named Save (ids 21 and 22). Buttons
+    used to drop their FileReference, so the button call resolved against
+    UI.fmp12 and never reached cross_file_references (#4). Every script
+    reference used to drop the script id, so the two Saves could not be told
+    apart (#8). A second button calls a file with no DDR (Gone)."""
+
+    @classmethod
+    def setUpClass(cls):
+        with contextlib.redirect_stdout(io.StringIO()):
+            cls.files = []
+            for name in ("UI.xml", "Backend.xml"):
+                ddr = parse_ddr.DDRFile(os.path.join(TWO_FILE, name))
+                ddr.parse_all()
+                cls.files.append(ddr)
+            cls.merger = parse_ddr.DDRMerger(cls.files)
+            cls.topology = cls.merger.merge_topology()
+        cls.calls = cls.topology["cross_file_references"]["script_calls"]
+
+    def test_step_keeps_the_target_script_id(self):
+        params = self.files[0].scripts[0]["steps"][0]["params"]
+        self.assertEqual((params["script"], params["script_id"], params["external_file"]),
+                         ("Save", "21", "Backend"))
+
+    def test_button_keeps_the_file_reference_and_script_id(self):
+        button = self.files[0].layouts[0]["buttons"][0]
+        self.assertEqual((button["script"], button["script_id"], button["external_file"]),
+                         ("Save", "22", "Backend"))
+        self.assertEqual((button["object_key"], button["object_name"]), ("7", "btnSave"))
+
+    def test_step_call_row_carries_step_and_script_ids(self):
+        row = next(c for c in self.calls if c["origin"] == "script_step")
+        self.assertEqual(row, {
+            "origin": "script_step", "from_file": "UI.fmp12",
+            "script": "Go", "script_id": "3", "step": "Perform Script", "step_id": "4",
+            "calls_script": "Save", "calls_script_id": "21",
+            "external_ref": "Backend", "resolved_to": "Backend.fmp12",
+        })
+
+    def test_button_call_row_is_marked_and_resolved_like_a_step(self):
+        row = next(c for c in self.calls if c["origin"] == "button" and c["object_key"] == "7")
+        self.assertEqual(row, {
+            "origin": "button", "from_file": "UI.fmp12",
+            "layout": "Home", "layout_id": "5", "button_type": "ButtonObj",
+            "object_key": "7", "object_name": "btnSave", "step": "Perform Script",
+            "calls_script": "Save", "calls_script_id": "22",
+            "external_ref": "Backend",
+            "resolved_to": self.merger._resolve_external_ref("UI.fmp12", "Backend"),
+        })
+        self.assertEqual(row["resolved_to"], "Backend.fmp12")
+
+    def test_unresolved_button_call_is_reported(self):
+        unresolved = [r for r in self.topology["unresolved_references"]
+                      if r["type"] == "script_call"]
+        self.assertEqual(len(unresolved), 1)
+        self.assertEqual((unresolved[0]["origin"], unresolved[0]["reference"]), ("button", "Gone"))
+
+
+
+class DuplicateSourceFileTests(unittest.TestCase):
+    """Two inputs with one DDR `File name` would mix their ids. Stop instead."""
+
+    def test_same_file_name_in_two_inputs_stops_and_names_both(self):
+        a = parse_ddr.DDRFile(FIXTURE)
+        b = parse_ddr.DDRFile(FIXTURE)
+        b.filepath = "/elsewhere/old_export.xml"
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as caught:
+            parse_ddr.check_unique_source_files([a, b])
+        self.assertEqual(caught.exception.code, 1)
+        self.assertIn("Mini.fmp12", err.getvalue())
+        self.assertIn(FIXTURE, err.getvalue())
+        self.assertIn("/elsewhere/old_export.xml", err.getvalue())
+
+    def test_distinct_file_names_pass(self):
+        a = parse_ddr.DDRFile(FIXTURE)
+        b = parse_ddr.DDRFile(FIXTURE)
+        b.source_file = "Other.fmp12"
+        parse_ddr.check_unique_source_files([a, b])
 
 
 if __name__ == "__main__":

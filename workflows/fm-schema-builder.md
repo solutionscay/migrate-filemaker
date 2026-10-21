@@ -39,6 +39,8 @@ Do not test `field_type == "Container"` or `operator == "="`; those literals do 
 
 Resolve every relationship side through `02_table_occurrences.json` using source-file context, occurrence id/name, `base_table`, `base_table_id`, and `resolved_source_file`.
 
+An occurrence with `external: true` is based on a table in another file, and its `base_table_id` is that file's id. Join it on (`resolved_source_file`, `base_table_id`). When `resolved_source_file` is `null` (`unresolved: true`, possibly with `ambiguous_candidates`), the base table is unknown. Do not fall back to `source_file`: a local table with the same id is a different table. Treat the edge as unresolved.
+
 For every predicate, retain:
 
 ```text

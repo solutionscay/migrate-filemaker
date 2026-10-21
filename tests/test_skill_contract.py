@@ -174,6 +174,7 @@ class CatalogContractTests(unittest.TestCase):
         for entry in catalog["entries"]:
             grouped.setdefault(entry["output_file"], []).append(entry)
         for name, entries in grouped.items():
+            (csv_root / name).parent.mkdir(parents=True, exist_ok=True)
             with (csv_root / name).open("w", newline="", encoding="utf-8") as handle:
                 writer = csv.DictWriter(handle, fieldnames=["source_id", "source_hash", "index"])
                 writer.writeheader()
@@ -192,7 +193,9 @@ class CatalogContractTests(unittest.TestCase):
             root = Path(directory)
             output = self.snapshot(root, scripts)
             catalog = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(catalog["entries"][0]["output_file"], "_root.csv")
+            root_file = catalog["entries"][0]["output_file"]
+            self.assertTrue(root_file.startswith("A.fmp12--"), root_file)
+            self.assertTrue(root_file.endswith("/_root.csv"), root_file)
             self.assertEqual(
                 catalog["entries"][1]["output_file"], catalog["entries"][2]["output_file"]
             )
@@ -200,6 +203,27 @@ class CatalogContractTests(unittest.TestCase):
             self.assertEqual(
                 catalog_contract.verify(argparse.Namespace(catalog=output, csv_root=csv_root)), 0
             )
+
+    def test_same_group_in_two_files_gets_two_output_files(self):
+        scripts = [
+            {"source_file": "A.fmp12", "id": "1", "group": "Utilities", "name": "Log", "steps": []},
+            {"source_file": "B.fmp12", "id": "1", "group": "Utilities", "name": "Log", "steps": []},
+            {"source_file": "A.fmp12", "id": "2", "group": "", "name": "Open", "steps": []},
+            {"source_file": "B.fmp12", "id": "2", "group": "", "name": "Open", "steps": []},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            catalog = json.loads(self.snapshot(root, scripts).read_text(encoding="utf-8"))
+            files = [entry["output_file"] for entry in catalog["entries"]]
+            self.assertEqual(len(set(files)), 4, files)
+
+    def test_same_layout_name_with_two_ids_gets_two_output_files(self):
+        rules = [
+            {"source_file": "A.fmp12", "layout_id": "3", "layout": "List", "formula": "1"},
+            {"source_file": "A.fmp12", "layout_id": "8", "layout": "List", "formula": "1"},
+        ]
+        entries = catalog_contract.flatten("hide-rules", rules)
+        self.assertNotEqual(entries[0]["output_file"], entries[1]["output_file"])
 
     def test_coverage_rejects_duplicate_missing_and_changed_rows(self):
         scripts = [

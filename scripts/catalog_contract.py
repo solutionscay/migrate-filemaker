@@ -43,10 +43,14 @@ def slug(value: str) -> str:
     return cleaned[:80] or "unnamed"
 
 
-def grouped_filename(group: str, identity: str, root_name: str | None = None) -> str:
+def grouped_filename(
+    source_file: str, group: str, identity: str, root_name: str | None = None
+) -> str:
+    # One folder per source file: same-named groups in two files stay apart.
+    folder = f"{slug(source_file)}--{digest_text(source_file)[:8]}"
     if not group and root_name:
-        return root_name
-    return f"{slug(group)}--{digest_text(identity)[:8]}.csv"
+        return f"{folder}/{root_name}"
+    return f"{folder}/{slug(group)}--{digest_text(identity)[:8]}.csv"
 
 
 def flatten(kind: str, value: Any) -> list[dict[str, Any]]:
@@ -54,7 +58,12 @@ def flatten(kind: str, value: Any) -> list[dict[str, Any]]:
     if kind == "scripts":
         for index, item in enumerate(value):
             identity = token("script", item.get("source_file"), item.get("id"))
-            rows.append(make_entry(index, identity, item.get("name"), item.get("group", ""), item, "_root.csv"))
+            rows.append(
+                make_entry(
+                    index, identity, item.get("name"), item.get("group", ""), item,
+                    item.get("source_file"), root_name="_root.csv",
+                )
+            )
     elif kind == "calculations":
         index = 0
         for table in value:
@@ -62,12 +71,21 @@ def flatten(kind: str, value: Any) -> list[dict[str, Any]]:
                 identity = token(
                     "calculation", table.get("source_file"), table.get("id"), item.get("id")
                 )
-                rows.append(make_entry(index, identity, item.get("name"), table.get("name", ""), item))
+                rows.append(
+                    make_entry(
+                        index, identity, item.get("name"), table.get("name", ""), item,
+                        table.get("source_file"),
+                    )
+                )
                 index += 1
     elif kind == "functions":
         for index, item in enumerate(value):
             identity = token("function", item.get("source_file"), item.get("id"))
-            rows.append(make_entry(index, identity, item.get("name"), "custom-functions", item))
+            rows.append(
+                make_entry(
+                    index, identity, item.get("name"), "custom-functions", item, item.get("source_file")
+                )
+            )
     elif kind in ("conditional-formatting", "hide-rules"):
         occurrences: defaultdict[str, int] = defaultdict(int)
         prefix = "cf" if kind == "conditional-formatting" else "hide"
@@ -77,7 +95,14 @@ def flatten(kind: str, value: Any) -> list[dict[str, Any]]:
             occurrence = occurrences[base]
             occurrences[base] += 1
             identity = token(base, occurrence)
-            rows.append(make_entry(index, identity, item.get("object_name") or "(unnamed)", item.get("layout", ""), item))
+            # Layout names can repeat within a file; the layout id keeps their files apart.
+            rows.append(
+                make_entry(
+                    index, identity, item.get("object_name") or "(unnamed)", item.get("layout", ""),
+                    item, item.get("source_file"),
+                    group_key=token(item.get("layout_id"), item.get("layout")),
+                )
+            )
     else:
         raise ValueError(f"unsupported kind: {kind}")
     return rows
@@ -89,7 +114,9 @@ def make_entry(
     label: Any,
     group: str,
     item: dict[str, Any],
+    source_file: str | None,
     root_name: str | None = None,
+    group_key: str | None = None,
 ) -> dict[str, Any]:
     source_hash = digest_text(canonical(item))
     return {
@@ -97,7 +124,9 @@ def make_entry(
         "source_id": identity,
         "source_hash": source_hash,
         "label": label or "",
-        "output_file": grouped_filename(group, group, root_name),
+        "output_file": grouped_filename(
+            source_file or "", group, group if group_key is None else group_key, root_name
+        ),
     }
 
 

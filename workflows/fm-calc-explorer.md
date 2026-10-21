@@ -17,7 +17,7 @@ python3 "$SKILL_DIR/scripts/catalog_contract.py" snapshot \
   --kind calculations --spec "$SPEC_FILE" --output "$CATALOG"
 ```
 
-Use the catalog's collision-resistant `output_file`; do not derive filenames from normalized table names yourself.
+Use the catalog's collision-resistant `output_file` (a `<source-file>--<hash>/` folder plus a file name); do not derive filenames from normalized table names yourself.
 
 ## Classification record
 
