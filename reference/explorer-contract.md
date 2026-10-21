@@ -38,7 +38,7 @@ The catalog records:
 - the original index for lookup only;
 - a collision-resistant output filename.
 
-For the root script group, the output filename is explicitly `_root.csv`. Other group/layout/table names include a hash suffix so normalized-name collisions do not merge unrelated sources.
+Each `output_file` is a relative path `<source-file>--<hash>/<group-file>`. The folder keeps same-named groups from different source files apart. Inside it, the root script group is explicitly `_root.csv`. Other group/layout/table names include a hash suffix so normalized-name collisions do not merge unrelated sources; conditional-formatting and hide-rule files also hash the layout id, so two layouts with the same name stay apart. Create the folder before you write the CSV.
 
 If `snapshot` reports that the source changed, stop. Archive or delete the stale classification directory, recreate the catalog with `--force`, and reclassify. Do not carry rows forward by index. A manual carry-forward is allowed only after matching `source_id` and verifying `source_hash`; record that operation.
 
