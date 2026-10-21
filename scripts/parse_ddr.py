@@ -1438,10 +1438,17 @@ class DDRMerger:
         for ddr in self.files:
             for to in ddr.table_occurrences:
                 if "external_file_reference" in to:
+                    # base_table_id belongs to the OTHER file. Mark the TO so a
+                    # consumer never joins it against source_file's tables.
                     ref_name = to["external_file_reference"]["name"]
-                    resolved = self._resolve_external_ref(ddr.source_file, ref_name)
-                    if resolved:
-                        to["resolved_source_file"] = resolved
+                    info = self.resolve_external_ref_info(ddr.source_file, ref_name)
+                    to["external"] = True
+                    to["resolved_source_file"] = info["resolved_to"]
+                    to["resolved_via"] = info["resolved_via"]
+                    if info["resolved_to"] is None:
+                        to["unresolved"] = True
+                    if info.get("ambiguous_candidates"):
+                        to["ambiguous_candidates"] = info["ambiguous_candidates"]
                 merged.append(to)
         return merged
 

@@ -829,6 +829,21 @@ class ExternalReferenceResolutionTest(unittest.TestCase):
         self.assertEqual(len(outs), 1, outs)
         self.assertIn("ambiguous_candidates", outs.pop())
 
+    def test_unresolved_external_to_is_marked(self):
+        ui = _StubFile("UI.fmp12", [{"name": "Gone", "paths": ["file:Gone"]}],
+                       [_ext_to("Contacts", "Gone")])
+        to = parse_ddr.DDRMerger([ui]).merge_table_occurrences()[0]
+        self.assertEqual((to["external"], to["resolved_source_file"], to["unresolved"]),
+                         (True, None, True))
+
+    def test_resolved_external_to_is_marked(self):
+        ui = _StubFile("UI.fmp12", [{"name": "Backend", "paths": ["file:Data"]}],
+                       [_ext_to("Contacts", "Backend")])
+        to = parse_ddr.DDRMerger([ui, _StubFile("Data.fmp12")]).merge_table_occurrences()[0]
+        self.assertEqual((to["external"], to["resolved_source_file"], to["resolved_via"]),
+                         (True, "Data.fmp12", "path"))
+        self.assertNotIn("unresolved", to)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

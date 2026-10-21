@@ -548,7 +548,7 @@ Table occurrences (`external_file_reference`) and Perform Script steps (`externa
 2. Only when no path entry matches, match the data-source name the same way (`resolved_via: "name_fallback"`).
 3. When one tier matches more than one parsed file (for example `Data.fmp12` and `data.fp7` for `DATA`), the reference is left unresolved and listed with `ambiguous_candidates` in `unresolved_references`. The parser never picks one, and candidates are listed in sorted order so the output does not depend on `PYTHONHASHSEED`.
 
-Each FileMaker data source in `00_topology.json` carries `resolved_to` and `resolved_via` (`null` when unresolved).
+Each FileMaker data source in `00_topology.json` carries `resolved_to` and `resolved_via` (`null` when unresolved). In `02_table_occurrences.json` every external occurrence carries `external: true`, `resolved_source_file` (`null` when unresolved), `resolved_via`, and `unresolved: true` when it did not resolve. Its `base_table_id` belongs to the other file. Never join it against `source_file`.
 
 ## FileMaker Naming Conventions (informational)
 
