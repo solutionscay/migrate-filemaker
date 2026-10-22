@@ -1,9 +1,9 @@
 -- FileMaker migration target schema
--- Generated only after workflows/fm-schema-builder.md gates pass.
+-- Written from the table, graph and value-list explorer CSVs.
 --
 -- Evidence:
 --   source implementation(s): <ids>
---   provenance/spec hashes: <hashes>
+--   objects: <path to objects/index.tsv>
 --   source data profile: <artifact/hash>
 --   target database/version: <database/version>
 --   timezone/DST decision: <decision id>
@@ -20,10 +20,10 @@ BEGIN;
 -- Source-to-target mapping register
 -- ---------------------------------------------------------------------------
 -- Maintain the full register in the companion schema decision artifact.
--- Every target object below cites source file/table/field ids or an approved
--- product-decision id.
+-- Every target object below cites its object file and field id, or an
+-- approved product-decision id.
 --
--- source_file | table_id | field_id | source_name | target_object | disposition
+-- object file | field id | source_name | target_object | disposition
 -- <...>
 
 -- ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ BEGIN;
 -- ---------------------------------------------------------------------------
 
 -- For each table document:
---   Source: <source_file>, table id <id>, name <name>
+--   Source: objects/<file>/tables/<id>-<name>.txt
 --   Source key evidence/profile: <artifact/result>
 --   Surrogate-key decision (if any): <decision id and reversible mapping>
 --   Validation changes: <decision ids>
@@ -68,7 +68,7 @@ BEGIN;
 -- the referenced target columns have proven uniqueness, types are compatible,
 -- and update/delete behavior is explicitly decided.
 --
--- Source relationship: <source_file>/<relationship_id>
+-- Source relationship: objects/<file>/relationships/<id>-<name>.txt
 -- Predicates: <left TO/base/field> Equal <right TO/base/field> [AND ...]
 -- Uniqueness/orphan evidence: <profile artifact>
 -- Ownership/delete decision: <decision id>
@@ -93,7 +93,7 @@ BEGIN;
 -- Views/generated values/triggers
 -- ---------------------------------------------------------------------------
 
--- Cite calculation identity, complete dependency analysis, target-platform
+-- Cite the table object file and field id, the full dependency list, target-platform
 -- restrictions, and semantic fixtures. Generated columns are not allowed for
 -- related/aggregate/context-dependent expressions unsupported by the target.
 

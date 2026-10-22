@@ -5,19 +5,19 @@
 | Item | Value/status |
 |---|---|
 | Source implementations/files |  |
-| Provenance/spec hashes |  |
+| DDR export and `objects/index.tsv` |  |
 | In-scope workflows/data/history |  |
 | Target stack/architecture decision |  |
 | Parallel-operation/cutover model |  |
 | Unavailable evidence/open decisions |  |
 
-Any source-hash change invalidates affected explorer and design artifacts until reconciled.
+A new DDR export needs a new explode and new catalogs. `catalog_contract.py verify` fails on a catalog made from the old one.
 
 ## Release increments
 
 Define increments around usable, authorized workflows—not generic CRUD layers.
 
-| Increment | User/business outcome | Source identities | Schema/operations/UI | Authorization | Dependencies | Size | Exit evidence | Rollback |
+| Increment | User/business outcome | Object files | Schema/operations/UI | Authorization | Dependencies | Size | Exit evidence | Rollback |
 |---|---|---|---|---|---|---|---|---|
 |  |  |  |  |  |  | S/M/L/XL |  |  |
 
@@ -34,11 +34,11 @@ Each increment must implement its server-side invariants and negative authorizat
 
 ## Business-logic implementation
 
-| Rule/operation | Source catalogs/ids | Preconditions | Reads/writes/scope | Target owner | Failure behavior | Semantic fixtures |
+| Rule/operation | Object files | Preconditions | Reads/writes/scope | Target owner | Failure behavior | Semantic fixtures |
 |---|---|---|---|---|---|---|
 |  |  |  |  |  |  |  |
 
-Cover scripts, calculated fields, custom functions, validation/auto-enter, value lists, conditional formatting, hide rules, and security predicates. Trigger invocation does not make persistent logic client-owned.
+Cover scripts, calculated fields, custom functions, validation/auto-enter, value lists, layout rules, custom menus, file triggers, and security predicates. Trigger invocation does not make persistent logic client-owned.
 
 ## Authorization implementation
 
@@ -59,7 +59,7 @@ Cover scripts, calculated fields, custom functions, validation/auto-enter, value
 |---|---|---|---|---|---|
 |  | inventory-only / behavior-ready / implementation-ready |  |  |  |  |
 
-Do not schedule inventory-only screens as implementation-complete. Acquire raw object mappings/screenshots or run an explicit product-design task first.
+Do not schedule inventory-only screens as implementation-complete. Get screenshots or run an explicit product-design task first.
 
 ## Integration and reporting plan
 
@@ -104,11 +104,11 @@ Keep outbound `Insert from URL` replacements separate from inbound webhook endpo
 | Rejected/changed rows with reasons |  |  |  |  |
 | Target constraint/negative cases |  |  |  |  |
 
-Random spot checks supplement this matrix; they never replace it.
+Random samples of migrated rows supplement this matrix; they never replace it.
 
 ## Test strategy
 
-- Semantic golden fixtures for high-risk source rules and recovered parser fallbacks.
+- Semantic fixtures for tier1 rules, built from the object files and non-secret sample data.
 - Unit tests for calculations/domain transitions and FileMaker coercion edge cases.
 - Integration tests for transactions, found-set bulk operations, retries, and external adapters.
 - Authorization tests for every forbidden create/read/update/delete/field/operation path.
@@ -137,7 +137,7 @@ Document the point after which rollback requires data reconciliation rather than
 
 ## Completion gate
 
-- [ ] Provenance and all explorer exact-set checks pass.
+- [ ] `catalog_contract.py verify` passes for every explorer.
 - [ ] Every logic-bearing catalog has a disposition.
 - [ ] Every source security dimension has an enforcement owner and negative test.
 - [ ] Every relationship predicate and target key is resolved or explicitly open.

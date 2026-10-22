@@ -15,8 +15,8 @@ ddr/
   goinspire/            GoInspire, one file plus Summary.xml
 ```
 
-Add a new export as `ddr/<solution>/<set>/`. Parse a set with:
+Add a new export as `ddr/<solution>/<set>/`. Explode a set with:
 
 ```bash
-python3 scripts/parse_ddr.py ddr/<solution>/<set> /tmp/specs-<set>
+python3 scripts/explode_ddr.py ddr/<solution>/<set> /tmp/objects-<set>
 ```

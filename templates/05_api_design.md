@@ -6,7 +6,7 @@ Use this artifact for the interface style selected in recommendations: server fu
 
 | Item | Value |
 |---|---|
-| Source/spec/explorer hashes |  |
+| Explorer CSVs used |  |
 | Selected interface style and reason |  |
 | Consumers/clients/integrations |  |
 | Authentication mechanism |  |
@@ -15,7 +15,7 @@ Use this artifact for the interface style selected in recommendations: server fu
 
 ## Use-case operation catalog
 
-| Domain/use case | Operation | Consumer | Input | Output | Source scripts/rules | Transaction/effects | Authorization policy | Idempotency/errors |
+| Domain/use case | Operation | Consumer | Input | Output | Object files | Transaction/effects | Authorization policy | Idempotency/errors |
 |---|---|---|---|---|---|---|---|---|
 |  |  |  |  |  |  |  |  |  |
 
@@ -81,7 +81,7 @@ Default deny. Route/operation checks, row filters, field restrictions, and UI vi
 
 ## Traceability and tests
 
-For each operation, link source identities and semantic fixtures. Require:
+For each operation, link its object files and semantic fixtures. Require:
 
 - happy-path and boundary behavior;
 - forbidden role/record/field/operation tests;

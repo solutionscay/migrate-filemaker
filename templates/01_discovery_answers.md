@@ -2,13 +2,13 @@
 
 ## Evidence basis
 
-| Verified artifact | Hash/status | What it establishes |
-|---|---|---|
-| App summary |  |  |
-| Explorer catalogs/reports |  |  |
-| Screenshots/raw/manual exports |  |  |
+| Artifact | What it establishes |
+|---|---|
+| `00_app_summary.md` |  |
+| Explorer CSVs (`explorers/*/csv/`) |  |
+| Screenshots/recordings |  |
 
-Use these labels throughout: `source fact`, `stakeholder statement`, `inference`, `product decision`, `unavailable`, and `conflict`.
+Use these labels throughout: `source fact` (cite the object file), `stakeholder statement`, `inference`, `product decision`, `unavailable`, and `conflict`.
 
 ## Goals and scope
 
@@ -36,17 +36,17 @@ Do not replace measured privilege rules with stakeholder memory. Record conflict
 
 ## Workflows and business invariants
 
-| Domain/workflow | Current purpose | Must preserve/change | Failure/exception behavior | Source identities | Decision owner |
+| Domain/workflow | Current purpose | Must preserve/change | Failure/exception behavior | Object files | Decision owner |
 |---|---|---|---|---|---|
 |  |  |  |  |  |  |
 
-Ask about tier1 scripts, calculations, custom functions, validation, value lists, conditional formatting, hide rules, and security predicates—not only scripts.
+Ask about tier1 scripts, calculations, custom functions, validation, value lists, layout rules, custom menus, and security predicates, not only scripts.
 
 ## Data migration
 
 | Topic | Answer/decision | Evidence needed |
 |---|---|---|
-| Source record/container volumes |  | profile/export |
+| Source record/container volumes |  | record counts, container export |
 | Candidate keys/duplicates/orphans |  | column profiles |
 | Historical/audit retention |  | policy/source |
 | Source timezone and DST policy |  | office/server records |

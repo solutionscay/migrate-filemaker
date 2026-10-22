@@ -315,6 +315,22 @@ class GuidanceRegressionTests(unittest.TestCase):
         for phrase in banned:
             self.assertNotIn(phrase, text)
 
+    def test_guidance_reads_object_files_not_json_specs(self):
+        text = self.read_scope()
+        self.assertNotRegex(text, r"\b\d\d_[a-z_]+\.json")
+        self.assertNotIn("parse_ddr.py", (ROOT / "SKILL.md").read_text(encoding="utf-8"))
+        for phrase in ["alarming", "suspicious", "surprising", "spot-check", "spot check"]:
+            self.assertNotIn(phrase, text.lower())
+
+    def test_every_exploded_kind_has_an_explorer(self):
+        explode = load_script("explode_ddr.py")
+        workflows = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "workflows").glob("*.md"))
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        for kind in set(explode.CATALOG_KIND.values()) | {"relationships", "file"}:
+            self.assertIn(f"--kind {kind}", workflows, kind)
+        for path in (ROOT / "workflows").glob("*.md"):
+            self.assertIn(f"workflows/{path.name}", skill)
+
     def test_repaired_high_risk_contracts_are_required(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         business = (ROOT / "templates" / "07_business_logic.md").read_text(encoding="utf-8")
@@ -383,7 +399,7 @@ class GuidanceRegressionTests(unittest.TestCase):
                 "DDR contains no password or password hash",
             ],
             "templates/07_business_logic.md": [
-                "Every source identity must map",
+                "Every source identity (an object file",
                 "A script-only document is incomplete",
             ],
             "templates/08_auth_roles.md": [

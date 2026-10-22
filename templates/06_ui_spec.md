@@ -1,33 +1,33 @@
 # UI Evidence and Target Specification
 
-## Evidence boundary
+## Evidence
 
-| Source | Hash/reference | Coverage | Missing |
-|---|---|---|---|
-| `04_layouts.json` |  | layout/field/portal/button inventory | bounds, static labels, tabs, triggers, control bindings, stable object ids |
-| Raw layout XML/object map |  |  |  |
-| Screenshots/recordings |  |  |  |
-| Script Explorer |  | actions/effects |  |
-| Hide/CF explorers |  | visibility/style | unattributed count |
-| Discovery/design decisions |  |  |  |
+| Source | Coverage | Missing |
+|---|---|---|
+| Layout object files (`objects/<file>/layouts/`) | objects, keys, bounds, labels, fields, value lists, tabs, popovers, portals, buttons, triggers, hide rules, conditional formats, tooltips | theme styling, how the screen looks |
+| Layout explorer CSVs |  |  |
+| Script explorer CSVs | what buttons and triggers do |  |
+| Menu explorer CSVs | menu commands and overrides |  |
+| Screenshots/recordings |  |  |
+| Discovery/design decisions |  |  |
 
 Overall readiness: <!-- inventory-only / behavior-ready / implementation-ready -->
 
-Do not claim implementation-ready while a required screen lacks labels/hierarchy/controls/actions/triggers/authorization/states or has unresolved unattributed rules.
+Do not claim implementation-ready while a required screen lacks labels/hierarchy/controls/actions/triggers/authorization/states.
 
 ## Source screen inventory
 
-| Source file/layout id/name | TO → base table | Purpose/view | Fields/portals/buttons | Raw/screenshot evidence | Hide/CF attribution | Readiness | Disposition |
+| Layout file | TO → base table | Purpose | Fields/portals/buttons | Hide/CF rules | Screenshot | Readiness | Disposition |
 |---|---|---|---|---|---|---|---|
-|  |  |  |  |  |  |  | keep/merge/retire/unresolved |
+| `objects/<file>/layouts/<id>-<name>.txt` |  |  |  |  |  |  | keep/merge/retire/unresolved |
 
-## Stable object map
+## Object map
 
-| Source file/layout id | Object key/status | Type/container path/bounds | Label/control/value list | Action/trigger | Hide/CF ids | Target component | Evidence |
-|---|---|---|---|---|---|---|---|
-|  | stable / derived / unattributed |  |  |  |  |  |  |
+| Layout file | Object key | Type/bounds/panel | Label/control/value list | Action/trigger | Hide/CF rule | Target component |
+|---|---|---|---|---|---|---|
+|  |  |  |  |  |  |  |
 
-Never join rules to controls by array order. Keep unnamed/unattributed rules in the unresolved table.
+Identify each object by its layout file and `key`.
 
 ## Navigation and workflows
 
@@ -43,7 +43,7 @@ A trigger may invoke a server-owned domain operation. Client visibility and rout
 
 - Readiness: <!-- inventory-only / behavior-ready / implementation-ready / blocked -->
 - Use case and users: <!-- -->
-- Source layouts/objects/scripts: <!-- stable ids -->
+- Source layouts/objects/scripts: <!-- object files and object keys -->
 - Data queries and authorized projection: <!-- -->
 - Commands and persistent invariant owner: <!-- -->
 - Hierarchy/layout/breakpoints: <!-- evidenced or explicit design decision -->
@@ -65,11 +65,11 @@ A trigger may invoke a server-owned domain operation. Client visibility and rout
 
 #### Conditional presentation
 
-| Object/component | Condition | Visual payload/visibility | Server rule cross-reference | Attribution/evidence |
+| Object key/component | Condition | Effect (style or hide) | Server rule cross-reference | Evidence |
 |---|---|---|---|---|
 |  |  |  |  |  |
 
-Preserve distinct `format_css` variants even when formulas match.
+Keep each distinct `Format:` even when conditions match.
 
 ## Design system and responsive decisions
 
@@ -82,18 +82,16 @@ Preserve distinct `format_css` variants even when formulas match.
 | Print/PDF behavior |  |  |  |
 | Accessibility target |  |  |  |
 
-## Unattributed and missing evidence
+## Missing evidence
 
-| Layout/rule/object | Missing evidence | Implementation risk | Required raw/screenshot/manual action | Owner/status |
+| Layout/object | Missing evidence | Implementation risk | Required screenshot/decision | Owner/status |
 |---|---|---|---|---|
 |  |  |  |  |  |
 
 ## Verification
 
-- [ ] Parsed layout counts reconcile to provenance/topology.
-- [ ] Critical raw object types/bounds/labels/tabs/triggers/value-list bindings were measured.
-- [ ] Every in-scope source layout has a target disposition.
+- [ ] Every in-scope layout file has a target disposition.
 - [ ] Every in-scope target page has an evidence readiness level.
-- [ ] Unattributed hide/CF rules are unresolved rather than guessed.
+- [ ] Every hide rule, conditional format, trigger and button in the layout explorer has a target behavior.
 - [ ] Server authorization negative tests exist for hidden/restricted operations and fields.
 - [ ] Critical workflows were walked against the current app/screenshots/recordings.

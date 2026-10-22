@@ -1,113 +1,98 @@
 # Application Summary
 
-## Evidence status
+Cite evidence as object file paths: `objects/<file>/<kind>/<id>-<name>.txt`.
+
+## Source
 
 | Item | Value |
 |---|---|
-| Implementation/source set | <!-- ids/names --> |
-| Raw manifest hash/status | <!-- verified / failed --> |
-| Parser hash | <!-- sha256 --> |
-| Spec hashes | <!-- _provenance.json reference --> |
-| Parser regression suite | <!-- command/result/date --> |
-| Raw/manual evidence used | <!-- paths/descriptions; no secret values --> |
-| Unavailable evidence | <!-- e.g. extended privileges, UI geometry --> |
-
-Do not continue this summary when provenance fails.
+| DDR export (folder, date, FileMaker version) |  |
+| Object files (`objects/index.tsv` rows) |  |
+| Extraction errors | <!-- none, or what explode_ddr.py reported --> |
 
 ## Application profile
 
-| Attribute | Measured value | Evidence / confidence |
+| Attribute | Value | Evidence |
 |---|---|---|
 | Name and purpose |  |  |
-| Source FileMaker files |  |  |
-| Base tables / table occurrences |  |  |
-| Relationship definitions / predicates |  |  |
+| FileMaker files |  |  |
+| Tables / table occurrences / relationships |  |  |
 | Layouts |  |  |
-| Script definitions / root scripts |  |  |
-| Value lists |  |  |
-| Privilege sets / accounts |  |  |
+| Scripts |  |  |
 | Custom functions |  |  |
-| Conditional-formatting rules |  |  |
-| Hide-object rules |  |  |
+| Value lists |  |  |
+| Privilege sets / accounts / extended privileges |  |  |
+| Custom menus / menu sets |  |  |
 
-List unresolved external files/calls and explain whether each is expected.
+Take each count from `cut -f1,2 objects/index.tsv | sort | uniq -c`.
 
-## Source-catalog coverage
+## Files and references
 
-| Catalog | Count | Explorer/status | Important omissions or caveats |
-|---|---:|---|---|
-| Tables: regular/calculated/summary/global fields |  |  |  |
-| Table occurrences |  |  |  |
-| Relationships and predicates |  |  |  |
-| Layout inventory |  |  | Current JSON is not a complete UI spec |
-| Scripts |  |  | Include root group, `step_text`, comments |
-| Value lists |  |  |  |
-| Security |  |  | Extended privileges not currently emitted |
-| Custom functions |  |  |  |
-| Conditional formatting |  |  | Preserve `format_css` variants |
-| Hide-object-when |  |  | Note unattributed objects |
+| File | References these files (data sources) | Unresolved data sources | Evidence |
+|---|---|---|---|
+|  |  |  | `objects/<file>/data-sources/...` |
+
+## Explorer coverage
+
+| Explorer | Kinds | Objects | `catalog_contract.py verify` |
+|---|---|---:|---|
+| Scripts | scripts |  |  |
+| Custom functions | custom-functions |  |  |
+| Tables | tables |  |  |
+| Layouts | layouts |  |  |
+| Graph | table-occurrences, relationships |  |  |
+| Security | privilege-sets, accounts, extended-privileges |  |  |
+| Value lists | value-lists |  |  |
+| Menus | custom-menus, custom-menu-sets |  |  |
+| File | file, data-sources, auth-files, base-directories, other kinds |  |  |
+
+Every kind in `objects/index.tsv` appears in one row.
 
 ## Data model
 
-| Source file | Base table | Records | Regular | Calculated | Summary | Globals | Binary | Candidate role | Key status |
-|---|---|---:|---:|---:|---:|---:|---:|---|---|
-|  |  |  |  |  |  |  |  |  | <!-- proven/profile-needed/unresolved --> |
+| File | Base table | Role | Regular | Calculated | Summary | Globals | Containers | Key status | Evidence |
+|---|---|---|---:|---:|---:|---:|---:|---|---|
+|  |  |  |  |  |  |  |  | <!-- shown / needs-profile / unresolved --> | `objects/<file>/tables/...` |
 
 ### Relationship semantics
 
-| Relationship | Left occurrence → base | Operator/predicates | Right occurrence → base | Likely use | Resolution status |
+| Relationship | Left occurrence → base | Predicates | Right occurrence → base | Meaning | Evidence |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
+|  |  |  |  |  | `objects/<file>/relationships/...` |
 
-Do not call an equality relationship a foreign key until referenced uniqueness and identity semantics are proven.
+Do not call an equality relationship a foreign key until the referenced key is shown to be unique.
 
 ### Globals, containers, time, and validation
 
-- Globals by observed/session/config preference purpose: <!-- counts and unknowns -->
-- `Binary` fields and storage/export evidence: <!-- count/plan-needed -->
-- Date/Time/TimeStamp source timezone evidence: <!-- value or unresolved -->
-- Parsed validation coverage versus raw/manual catalog: <!-- measured -->
+- Globals by purpose (session filter, UI state, preference, shared config): <!-- counts -->
+- Container fields and where they store data: <!-- count, base-directories -->
+- Source timezone for Date/Time/TimeStamp values: <!-- value or unresolved -->
+- Fields with validation or auto-enter: <!-- count from the table explorer -->
 
 ## Functional and logic map
 
-| Domain | Source identities/groups | Reads/writes | Specialized rules | Confidence / open questions |
+| Domain | Objects (scripts, fields, functions, layouts) | Reads/writes | Specialized rules | Open questions |
 |---|---|---|---|---|
 |  |  |  |  |  |
 
 Report `ExecuteSQL()` calculation uses separately from `Execute SQL` ODBC steps. Do not exclude navigation/startup/trigger-named scripts before tracing effects.
 
-## UI evidence boundary
-
-| Evidence | Coverage | Missing |
-|---|---|---|
-| Parsed layout inventory |  | bounds, static text, tabs, triggers, controls, stable object ids as applicable |
-| Raw layout XML review |  |  |
-| Screenshots/recordings |  |  |
-| Hide/CF attribution |  |  |
-
-Classify the current deliverable as `inventory-only`, `behavior-ready`, or `implementation-ready`, with justification.
-
 ## Security model
 
-| Dimension | Measured source rules | Source | Interpretation status |
+| Dimension | Count | Evidence | Notes |
 |---|---:|---|---|
-| Accounts and provisioning |  | `07_security.json` | Password/hash unavailable in DDR |
-| Privilege sets |  | `07_security.json` |  |
-| Table/record privileges |  | `07_security.json` |  |
-| Field restrictions |  | `07_security.json` |  |
-| Layout privileges |  | `07_security.json` |  |
-| Script/value-list privileges |  | security/raw |  |
-| Extended privileges/access channels |  | raw/manual or unavailable |  |
-| Hide/format UI exceptions |  | 09/10 explorers | Secondary UI evidence only |
+| Accounts and provisioning |  | `objects/<file>/accounts/...` | The DDR has no passwords or hashes |
+| Privilege sets |  | `objects/<file>/privilege-sets/...` |  |
+| Record-level rules |  |  |  |
+| Field restrictions |  |  |  |
+| Layout / script / value-list access |  |  |  |
+| Extended privileges (access channels) |  | `objects/<file>/extended-privileges/...` |  |
+| Hide and conditional-format rules |  | layout explorer | UI evidence only |
 
 Do not infer access level from privilege-set names alone.
 
-## Risks and open decisions
+## Open decisions
 
-| Risk/decision | Evidence | Impact | Owner / next proof |
+| Decision | Evidence | Impact | Owner |
 |---|---|---|---|
 |  |  |  |  |
-
-## Raw semantic spot checks
-
-Record at least one checked example for calculations with field operands, root scripts, populated `step_text`/comments, CF payload, and security predicates/grants. Describe locations and results without exposing secrets.

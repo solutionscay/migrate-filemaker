@@ -25,34 +25,34 @@ OUT_DIR="/path/to/migration"         # everything this skill writes
 
 ```bash
 python3 "$SKILL_DIR/scripts/explode_ddr.py" "$RAW_DIR" "$OUT_DIR/objects"
-python3 "$SKILL_DIR/scripts/parse_ddr.py"   "$RAW_DIR" "$OUT_DIR/specs"
 ```
 
 - `objects/<file>/<kind>/<id>-<name>.txt` is one text file per object: scripts as numbered steps, tables with every field option, layouts as their object tree (labels, tooltips, triggers, buttons, hide rules, conditional formats, portal filters), table occurrences with their relationships, value lists, custom functions, custom menus, accounts, privilege sets, data sources, file options.
 - Every calculation shows its text and a `refs:` line with the fields (`TO::field#id`) and custom functions it uses.
 - `objects/index.tsv` lists every object: file, kind, id, name, folder, path, hash, lines.
-- `specs/*.json` holds the same solution as structured JSON for counting and joining.
-- If either command reports an error, stop and fix the extraction first.
+- If the command reports an error, stop and fix the extraction first.
 
 The object files are the reading surface. Find usage with `grep -rl 'Invoices::total#' "$OUT_DIR/objects"`, then read the hits in full.
 
 ## Step 2: Inventory
 
-Write `00_app_summary.md` from [templates/00_app_summary.md](templates/00_app_summary.md). Count every kind in `objects/index.tsv`. List the files, how they reference each other, and any unresolved references the parser printed.
+Write `00_app_summary.md` from [templates/00_app_summary.md](templates/00_app_summary.md). Count every kind in `objects/index.tsv`. List the files and how they reference each other (their `data-sources` objects).
 
 ## Step 3: Read every object
 
-Go through every object kind and classify each object. Write one CSV row per object. Use `scripts/catalog_contract.py` to prove that every object has exactly one row (see [reference/explorer-contract.md](reference/explorer-contract.md)).
+Every row of `objects/index.tsv` is read in full and gets one CSV row. Each explorer snapshots its kinds with `scripts/catalog_contract.py`, and `verify` proves that every object has exactly one row (see [reference/explorer-contract.md](reference/explorer-contract.md)).
 
 - Scripts: [workflows/fm-script-explorer.md](workflows/fm-script-explorer.md)
-- Calculated fields, auto-enter and validation: [workflows/fm-calc-explorer.md](workflows/fm-calc-explorer.md)
 - Custom functions: [workflows/fm-func-explorer.md](workflows/fm-func-explorer.md)
-- Conditional formatting: [workflows/fm-cf-explorer.md](workflows/fm-cf-explorer.md)
-- Hide rules: [workflows/fm-hide-explorer.md](workflows/fm-hide-explorer.md)
-- Layouts and UI: [workflows/fm-ui-spec.md](workflows/fm-ui-spec.md)
-- Tables and relationships: [workflows/fm-schema-builder.md](workflows/fm-schema-builder.md)
+- Tables, with calculated fields, auto-enter and validation: [workflows/fm-table-explorer.md](workflows/fm-table-explorer.md)
+- Layouts, with hide rules, conditional formats, triggers, buttons, tooltips and portal filters: [workflows/fm-layout-explorer.md](workflows/fm-layout-explorer.md)
+- Table occurrences and relationships: [workflows/fm-graph-explorer.md](workflows/fm-graph-explorer.md)
+- Privilege sets, accounts and extended privileges: [workflows/fm-security-explorer.md](workflows/fm-security-explorer.md)
+- Value lists: [workflows/fm-value-list-explorer.md](workflows/fm-value-list-explorer.md)
+- Custom menus and menu sets: [workflows/fm-menu-explorer.md](workflows/fm-menu-explorer.md)
+- File options, data sources, and every other kind: [workflows/fm-file-explorer.md](workflows/fm-file-explorer.md)
 
-Large solutions have thousands of objects. Split each kind into batches, run batches in parallel, and merge the rows by object id.
+Large solutions have thousands of objects. The catalog splits each kind into batches of 50 (one CSV each). Give each agent whole batches and run them in parallel.
 
 ## Step 4: Discovery questions
 
@@ -78,6 +78,6 @@ For FileMaker behavior, see [reference/filemaker-concepts.md](reference/filemake
 
 ## Done when
 
-- Every object kind in `objects/index.tsv` has its classification CSV, and `catalog_contract.py verify` passes for each.
+- Every kind in `objects/index.tsv` is in one explorer's catalog, and `catalog_contract.py verify` passes for every explorer.
 - Every artifact in Step 5 exists, cites object files, and lists its open decisions.
 - No artifact contains a credential.

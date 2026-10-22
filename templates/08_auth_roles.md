@@ -2,13 +2,14 @@
 
 ## Authority and evidence
 
-| Source | Hash/count | Authority/use | Gaps |
+| Source | Count | Authority/use | Gaps |
 |---|---|---|---|
-| Accounts/privilege sets (`07_security.json`) |  | Primary identity/authorization catalog | Password hashes absent |
-| Table/record/field/layout privileges |  | Primary enforcement evidence |  |
-| Script/value-list privileges |  | Operation/lookup evidence |  |
-| Extended privileges |  | Raw/manual access-channel evidence | Not in current parsed spec |
-| Hide/conditional explorers |  | Secondary UI/exception evidence | Unattributed objects |
+| `accounts`, `privilege-sets` object files |  | Primary identity/authorization catalog | Password hashes absent |
+| Record/field/layout privileges in privilege-set files |  | Primary enforcement evidence |  |
+| Script/value-list privileges in privilege-set files |  | Operation/lookup evidence |  |
+| `extended-privileges` object files |  | Access-channel evidence |  |
+| Layout explorer (hide and format rules) |  | Secondary UI/exception evidence |  |
+| Menu explorer (removed or gated commands) |  | Secondary UI evidence |  |
 | Discovery/IdP policy |  | Target product decision |  |
 
 Never use hide-object formulas as a replacement for the privilege catalog. Never infer an ownership column/predicate from a role name; cite the exact source predicate and target schema field.
@@ -63,13 +64,13 @@ Apply restrictions before serialization and mutation, not only in forms.
 |---|---|---|---|---|
 |  |  |  |  |  |
 
-Route guards and hidden navigation supplement the underlying operation/row/field policies. Extended privileges must be extracted from raw/manual evidence or marked unavailable, never assumed absent.
+Route guards and hidden navigation supplement the underlying operation/row/field policies. Take extended privileges from the `extended-privileges` object files.
 
 ## UI visibility and exceptions
 
-| Hide/CF source ids | Object attribution | Condition | Related server policy | Target UI behavior | Unresolved risk |
+| Layout file | Object key | Condition | Related server policy | Target UI behavior | Unresolved risk |
 |---|---|---|---|---|---|
-|  | stable/unattributed |  |  |  |  |
+|  |  |  |  |  |  |
 
 An absent/hidden control does not authorize or deny the operation by itself.
 
@@ -103,12 +104,12 @@ Include direct API/server calls that bypass the UI, cross-record ownership attem
 
 ## Completion gate
 
-- [ ] All parsed security dimensions reconcile to target enforcement.
-- [ ] Extended privileges are raw/manual mapped or explicitly unavailable.
+- [ ] Every privilege-set dimension maps to target enforcement.
+- [ ] Every extended privilege has a target access channel or a retirement decision.
 - [ ] Every entity operation defaults deny and has conditional rules where needed.
 - [ ] Every field restriction is enforced before read/write serialization.
 - [ ] Every record predicate references real target columns with equivalent meaning.
-- [ ] Hide/CF rules are secondary and unattributed rules remain open.
+- [ ] Hide/CF rules are secondary UI evidence only.
 - [ ] Identity provisioning covers resets/IdP, disabled users, and service principals.
 - [ ] Negative tests pass through non-UI entry points.
 - [ ] No credential literal appears in this document.
