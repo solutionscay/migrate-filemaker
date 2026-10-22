@@ -1228,15 +1228,11 @@ class DDRFile:
                 "id": fr.get("id", ""),
                 "name": fr.get("name", ""),
             }
-            # A real DDR stores the targets in the pathList attribute
-            # (pathList="file:Data"). Older docs showed PathList/Path
-            # children; read those too in case some DDR version emits them.
-            paths = split_path_list(fr.get("pathList", ""))
-            path_list = fr.find("PathList")
-            if path_list is not None:
-                for p in path_list.findall("Path"):
-                    if p.text and p.text.strip():
-                        paths.append(p.text.strip())
+            # Real DDRs carry a `link` attribute on some entries; its meaning
+            # is unconfirmed, so keep it verbatim.
+            if fr.get("link") is not None:
+                entry["link"] = fr.get("link")
+            paths = reference_paths(fr)
             if paths:
                 entry["paths"] = paths
             self._inject_source(entry)
@@ -1272,9 +1268,28 @@ def split_path_list(value):
     return [p.strip() for p in _PATH_ENTRY_START.split(value.strip()) if p.strip()]
 
 
+def reference_paths(fr):
+    """The paths of a <FileReference>, in the order FileMaker tries them.
+
+    Real DDRs use more than one shape for the same reference:
+      - ExternalDataSourcesCatalog: a pathList="file:Data" attribute;
+      - an External value list: the text of a <UniversalPathList> child;
+      - <PathList><Path>file:Data</Path></PathList> children, shown by older
+        docs and not seen in a real DDR; read in case some version emits it.
+    """
+    paths = split_path_list(fr.get("pathList", ""))
+    path_list = fr.find("PathList")
+    if path_list is not None:
+        for p in path_list.findall("Path"):
+            if p.text and p.text.strip():
+                paths.append(p.text.strip())
+    paths.extend(split_path_list(fr.findtext("UniversalPathList", "")))
+    return paths
+
+
 def path_target_name(path):
     """The file name a pathList entry points at: 'fmnet:/*/Data' -> 'Data'."""
-    target = _PATH_SCHEME.sub("", path.strip(), count=1)
+    target = _PATH_SCHEME.sub("", path.strip(), count=1).rstrip("/\\")
     target = re.split(r"[/\\]", target)[-1].strip()
     return target
 
@@ -1320,19 +1335,27 @@ class DDRMerger:
                 return hits
         return []
 
-    def _resolve_eds(self, eds):
-        """Resolve one FileMaker data source to a parsed file.
-
-        Try each pathList entry in order (FM opens the first that exists).
-        Use the data-source name only when no path entry matches a parsed file.
-        """
-        for path in eds.get("paths", []):
+    def _resolve_paths(self, paths):
+        """Resolution record from the first path entry that matches a parsed
+        file (FM opens the first that exists), or None when none matches."""
+        for path in paths or []:
             hits = self._match_known_files(path_target_name(path))
             if len(hits) == 1:
                 return {"resolved_to": hits[0], "resolved_via": "path", "matched_path": path}
             if hits:
                 return {"resolved_to": None, "resolved_via": "path", "matched_path": path,
                         "ambiguous_candidates": hits}
+        return None
+
+    def _resolve_eds(self, eds):
+        """Resolve one FileMaker data source to a parsed file.
+
+        Try each path entry in order. Use the data-source name only when no
+        path entry matches a parsed file.
+        """
+        info = self._resolve_paths(eds.get("paths"))
+        if info is not None:
+            return info
         hits = self._match_known_files(eds["name"])
         if len(hits) == 1:
             return {"resolved_to": hits[0], "resolved_via": "name_fallback"}
@@ -1352,9 +1375,16 @@ class DDRMerger:
                         eds_map[key] = self._resolve_eds(eds)
         return eds_map
 
-    def resolve_external_ref_info(self, source_file, ref_name):
+    def resolve_external_ref_info(self, source_file, ref_name, paths=None):
         """Resolution record for a reference: resolved_to, resolved_via and,
-        when set, matched_path and ambiguous_candidates."""
+        when set, matched_path and ambiguous_candidates.
+
+        `paths` serves a reference that carries its own path (an External
+        value list); they are tried first, then the data source of that name.
+        """
+        info = self._resolve_paths(paths)
+        if info is not None:
+            return info
         info = self._eds_map.get((source_file, ref_name))
         if info is not None:
             return dict(info)

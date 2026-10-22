@@ -586,8 +586,11 @@ This catalog lists references to other files or databases that the current FM fi
 - `name`: The data source's alias. Table occurrences and script steps refer to the data source by this name. It is **not** a file name: a data source named `Backend` can point at `Data.fmp12`.
 - `id`: Internal FM identifier
 - `pathList`: An attribute (not a child element) that holds the targets FM tries, in order, when it opens the reference. Entries use a scheme prefix: `file:`, `fmnet:/`, `filemac:/`, `filewin:/`. The parser emits them as `paths`.
+- `link`: Present on some entries in real FileMaker 22 DDRs (attribute sets seen: `id name pathList` and `id link name pathList`, per the comment on issue #2). Its meaning is unconfirmed. The parser keeps it verbatim as `link`, and does not use it for resolution.
 
-Evidence: 57 `FileReference` entries across 13 real multi-file DDR sets all use the attribute, and each holds exactly one entry. Shapes seen (placeholder names): `file:Name`, `file:Name Name`, `file:Name.ext`, `fmnet:/host/Name`, `fmnet:/1.2.3.4/Name Name Name`, `filewin:/C:/dir/dir/Name`, and `filemac:`-style paths with spaces in folder names. No real DDR has shown how several entries are separated inside the one attribute. The parser splits on line breaks, and on whitespace that is followed by a scheme prefix, so a name or folder with a space stays whole. Older versions of this doc showed `PathList > Path` children; the parser still reads them if present, but no real DDR has shown that shape.
+One helper, `reference_paths()`, reads a `FileReference`'s paths in any of three shapes: the `pathList` attribute (the catalog), the text of a `UniversalPathList` child (External value lists), and `PathList > Path` children (older docs; not seen in a real DDR).
+
+Evidence: 57 `FileReference` entries across 13 real multi-file DDR sets all use the attribute, and each holds exactly one entry. Shapes seen (placeholder names): `file:Name`, `file:Name Name`, `file:Name.ext`, `fmnet:/host/Name`, `fmnet:/1.2.3.4/Name Name Name`, `filewin:/C:/dir/dir/Name`, and `filemac:`-style paths with spaces in folder names. No real DDR has shown how several entries are separated inside the one attribute. The parser splits on line breaks, and on whitespace that is followed by a scheme prefix, so a name or folder with a space stays whole. A real DDR also showed one path with no scheme (comment on issue #2). The parser resolves such a path by its last segment, like any other.
 
 ### OdbcDataSource entries (external non-FM databases)
 

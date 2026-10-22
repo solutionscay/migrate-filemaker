@@ -810,6 +810,49 @@ class ExternalReferenceResolutionTest(unittest.TestCase):
                 self.assertEqual(parse_ddr.split_path_list(value), [value])
                 self.assertEqual(parse_ddr.path_target_name(value), target)
 
+    def test_path_without_a_scheme_resolves_by_its_last_segment(self):
+        for value in ("Data", "dir/dir/Data.fmp12", "dir\\Data", "fmnet:/host/Data/"):
+            with self.subTest(value=value):
+                self.assertEqual(parse_ddr.path_target_name(value).split(".")[0], "Data")
+        ui = _StubFile("UI.fmp12", [{"name": "Alias", "paths": ["dir/Data"]}])
+        m = parse_ddr.DDRMerger([ui, _StubFile("Data.fmp12")])
+        self.assertEqual(m._resolve_external_ref("UI.fmp12", "Alias"), "Data.fmp12")
+
+    def test_reference_paths_reads_all_three_shapes(self):
+        import xml.etree.ElementTree as ET
+        shapes = {
+            '<FileReference id="1" name="A" pathList="file:Data"/>': ["file:Data"],
+            '<FileReference id="1" name="A"><PathList><Path>file:Data</Path>'
+            '<Path>fmnet:/host/Data</Path></PathList></FileReference>': ["file:Data", "fmnet:/host/Data"],
+            '<FileReference id="1" name="A"><UniversalPathList>file:Data</UniversalPathList>'
+            '</FileReference>': ["file:Data"],
+        }
+        for xml, paths in shapes.items():
+            with self.subTest(xml=xml):
+                self.assertEqual(parse_ddr.reference_paths(ET.fromstring(xml)), paths)
+
+    def test_link_attribute_is_kept_on_the_data_source(self):
+        import xml.etree.ElementTree as ET
+        ddr = parse_ddr.DDRFile.__new__(parse_ddr.DDRFile)
+        ddr.source_file = "UI.fmp12"
+        ddr.file_el = ET.fromstring(
+            '<File><ExternalDataSourcesCatalog>'
+            '<FileReference id="1" link="x" name="A" pathList="file:Data"/>'
+            '<FileReference id="2" name="B" pathList="file:Other"/>'
+            '</ExternalDataSourcesCatalog></File>')
+        with contextlib.redirect_stdout(io.StringIO()):
+            a, b = ddr._parse_external_data_sources()
+        self.assertEqual((a["link"], a["paths"]), ("x", ["file:Data"]))
+        self.assertNotIn("link", b)
+
+    def test_own_paths_win_over_the_data_source_of_that_name(self):
+        ui = _StubFile("UI.fmp12", [{"name": "Data", "paths": ["file:Data"]}])
+        m = parse_ddr.DDRMerger([ui, _StubFile("Data.fmp12"), _StubFile("Archive.fmp12")])
+        self.assertEqual(m.resolve_external_ref_info("UI.fmp12", "Data", ["file:Archive"])["resolved_to"],
+                         "Archive.fmp12")
+        self.assertEqual(m.resolve_external_ref_info("UI.fmp12", "Data", ["file:Gone"])["resolved_to"],
+                         "Data.fmp12")
+
     def test_multi_entry_pathList_keeps_spaced_names_and_drive_letters(self):
         value = "file:Name Name\nfmnet:/1.2.3.4/Name Name filewin:/C:/dir name/Name"
         self.assertEqual(parse_ddr.split_path_list(value),
