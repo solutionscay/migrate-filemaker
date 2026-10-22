@@ -2,47 +2,74 @@
 
 ![migrate-filemaker: from a FileMaker DDR to a verified, documented rebuild plan](assets/banner.png)
 
-A coding-agent skill for FileMaker rebuilds. It reads a FileMaker Database Design Report (DDR) as XML and produces a rebuild plan. Each conclusion in the plan links back to the XML.
+![status](https://img.shields.io/badge/status-active%20development-orange)
+![tests](https://img.shields.io/badge/tests-95%20passing-brightgreen)
+![real DDRs](https://img.shields.io/badge/real%20DDRs-15%20sets%2C%2063k%20objects-blue)
+![calculations](https://img.shields.io/badge/calculations%20rendered-620k%20of%20620k-brightgreen)
+![python](https://img.shields.io/badge/python-3%20%C2%B7%20stdlib%20only-3776AB)
+![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
-## Requirements
+A skill for coding agents that turns a FileMaker Database Design Report into a migration plan.
 
-- A coding agent that supports skills (Claude Code, Codex, or similar)
-- Python 3, standard library only
-- The full DDR XML export: one file per FileMaker file, plus `Summary.xml` when you have it
+FileMaker exports a DDR as one large XML file per database file. An agent cannot read 300 MB of XML. So the skill first breaks the DDR into one text file per object: every script, table, layout, relationship, value list, custom function, menu, account and privilege set. The agent reads every one of those files, classifies it, and writes the plan from what they say. Every claim in the plan points at an object file.
 
-Raw DDR XML can contain credentials and client logic. Keep it out of version control.
+## What you need
+
+- A coding agent that loads skills (Claude Code, Codex, or similar)
+- Python 3. No packages.
+- The full DDR XML export: one XML file per FileMaker file, plus `Summary.xml` if you have it
+
+A DDR contains your client's logic and, often, passwords and API keys. Keep it out of version control.
 
 ## Install
 
-Clone this directory into your agent's skills folder. Invoke it as `$migrate-filemaker`, or tell the agent to load `SKILL.md`.
+Clone the repo into your agent's skills folder. Then ask for `$migrate-filemaker`, or tell the agent to load `SKILL.md`.
 
-## Process
+## How it works
 
-1. Extract: write one text file per FileMaker object (script, table, layout, privilege set, menu and the rest), plus an index of all of them.
-2. Explore: read every object file and classify it in one CSV row. A coverage check proves that each object is classified exactly once.
-3. Discover: ask the owner what the XML cannot tell you: business rules, users, integrations, operations.
-4. Design: write the schema, API, UI, business logic, authorization, data migration, and cutover plan.
-5. Plan: write the migration plan, citing object files as evidence.
+1. Extract. `explode_ddr.py` writes one text file per object, an `index.tsv` of all of them, a `LEGEND.md` for the codes, and an `unresolved.tsv` of references to deleted or missing targets. It stops if any calculation, attribute or credential check fails.
+2. Inventory. Count what is there and how the files connect.
+3. Read every object. Nine explorers (scripts, tables, layouts, graph, security, value lists, menus, custom functions, file settings) each read their kind and write one CSV row per object. `catalog_contract.py verify` proves nothing was skipped.
+4. Ask. List what the DDR cannot answer: goals, users, identity, integrations, which behaviors to keep.
+5. Plan. Write the schema, API, UI, business logic, authorization, data migration and cutover documents from the templates.
 
-`SKILL.md` has the full process.
+The skill records what the FileMaker solution does. It does not judge whether that logic is right.
+
+## What an object file looks like
+
+A script reads the way Script Workspace shows it, with the ids a search needs. `//` marks a disabled step.
+
+```
+# script 12: Go Home
+# file: Orders.fmp12
+# folder: Navigation
+# steps: 9 (1 disabled)
+
+   3    If [ not IsEmpty ( $$cart_id ) ]
+   6    Perform Script [ "Clear Cart" ]
+        Script id=40 name="Clear Cart"
+   8 // Commit Records/Requests [ No dialog ]
+   9    Go to Layout [ "Home" (Customers) ]
+        Layout id=2 name=Home
+```
+
+Each calculation also gets a `refs:` line, such as `refs: Invoices::total#14, cf:FormatMoney`. To find every place a field is used, run `grep -rl 'Invoices::total#' objects/`.
 
 ## Scripts
 
 ```bash
-python3 scripts/explode_ddr.py RAW_DIR OBJECTS_DIR       # DDR XML -> one text file per object
-python3 scripts/catalog_contract.py {snapshot,verify} ... # explorer coverage check
-python3 scripts/parse_ddr.py RAW_DIR [SPECS_DIR]        # DDR XML -> JSON specs (not used by the steps)
-python3 scripts/provenance.py {create,verify} ...       # bind raw XML, parser and specs
+python3 scripts/explode_ddr.py RAW_DIR OBJECTS_DIR            # DDR XML -> object files
+python3 scripts/catalog_contract.py snapshot|verify ...       # explorer coverage
+python3 scripts/parse_ddr.py RAW_DIR SPECS_DIR                # DDR XML -> JSON, optional
 ```
 
-Both extractors handle multi-file solutions and redact credentials they find in the XML.
+## Repo layout
 
-## Layout
-
-- `scripts/`: extractors, provenance, and coverage tools
-- `workflows/`: one guide per explorer: what to read, what to record
-- `reference/`: DDR XML format, FileMaker concepts, translation patterns
-- `templates/`: the migration documents the process fills in
+- `scripts/`: the extractor and the coverage check
+- `workflows/`: one guide per explorer: what to read and what to record
+- `templates/`: the migration documents
+- `reference/`: the DDR format, FileMaker concepts, translation patterns
+- `ddr/`: git-ignored folder for real DDR exports to test against
 
 ## Tests
 

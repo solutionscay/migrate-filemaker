@@ -13,7 +13,7 @@ Stdlib only. `parse_ddr.py` has no dependencies and must keep none.
 - `test_parse_ddr.py` — runs the real parser over it and asserts the output exactly.
 - `test_explode_ddr.py` — explodes the fixture and checks that every calculation
   lands in an object file and that the index lists every file.
-- `test_skill_contract.py` — guards provenance, explorer catalogs built from
+- `test_skill_contract.py` — guards explorer catalogs built from
   `objects/index.tsv` (one identity per row, batch files, exact-set coverage,
   stale catalogs), supported skill metadata, and the guidance in workflows and
   templates.

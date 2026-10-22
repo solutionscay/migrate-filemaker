@@ -10,9 +10,7 @@ FileMaker DDR XML files of one solution (one per FileMaker file) and its
 
 ```
 ddr/
-  dacw/<office>/        13 offices, 2-3 files each (Main + Schema)
-  core-crm/             Core CRM Pro, one file, no Summary.xml
-  goinspire/            GoInspire, one file plus Summary.xml
+  <solution>/<set>/     the XML files of one export, plus Summary.xml when present
 ```
 
 Add a new export as `ddr/<solution>/<set>/`. Explode a set with:

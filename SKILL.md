@@ -30,7 +30,9 @@ python3 "$SKILL_DIR/scripts/explode_ddr.py" "$RAW_DIR" "$OUT_DIR/objects"
 - `objects/<file>/<kind>/<id>-<name>.txt` is one text file per object: scripts as numbered steps, tables with every field option, layouts as their object tree (labels, tooltips, triggers, buttons, hide rules, conditional formats, portal filters), table occurrences with their relationships, value lists, custom functions, custom menus, accounts, privilege sets, data sources, file options.
 - Every calculation shows its text and a `refs:` line with the fields (`TO::field#id`) and custom functions it uses.
 - `objects/index.tsv` lists every object: file, kind, id, name, folder, path, hash, lines.
-- If the command reports an error, stop and fix the extraction first.
+- `objects/LEGEND.md` explains the markers and every code that appears in the object files. Read it once before Step 3.
+- `objects/unresolved.tsv` lists every reference whose target is deleted (`ref=none`, `ref=missing`) or in a file that was not exported (`ref=external`).
+- The run stops with an error if any calculation, attribute or credential check fails. Fix the extraction before going on.
 
 The object files are the reading surface. Find usage with `grep -rl 'Invoices::total#' "$OUT_DIR/objects"`, then read the hits in full.
 
