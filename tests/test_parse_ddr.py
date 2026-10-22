@@ -1011,8 +1011,8 @@ class CrossFileScriptCallTest(unittest.TestCase):
 class ValueListSourceTest(unittest.TestCase):
     """Only Custom and Field sources were parsed; any other source came out as
     a bare {id, name, source_file} (#7). UI.fmp12 has a Field list on an
-    external TO and two synthetic External lists, one into a file with no DDR.
-    No real DDR with an External source has been seen."""
+    external TO, two External lists in the real FileMaker 22 shape (one into a
+    file with no DDR), and one list with a source the parser does not know."""
 
     @classmethod
     def setUpClass(cls):
@@ -1028,12 +1028,22 @@ class ValueListSourceTest(unittest.TestCase):
             cls.topology = merger.merge_topology()
 
     def test_unknown_source_is_typed_flagged_and_warned(self):
-        vl = self.vlists["Statuses"]
-        self.assertEqual((vl["type"], vl["unparsed"]), ("external", True))
-        self.assertEqual(vl["source"], {"attributes": {"value": "External"},
-                                        "children": ["FileReference"]})
-        self.assertIn("value list 'Statuses' has unsupported source 'External'",
+        vl = self.vlists["Odd"]
+        self.assertEqual((vl["type"], vl["unparsed"]), ("mystery", True))
+        self.assertEqual(vl["source"], {"attributes": {"value": "Mystery"},
+                                        "children": ["Hint"]})
+        self.assertIn("value list 'Odd' has unsupported source 'Mystery'",
                       self.err.getvalue())
+
+    def test_external_list_real_shape_is_parsed_not_unparsed(self):
+        vl = self.vlists["Statuses"]
+        self.assertEqual(vl["type"], "external")
+        self.assertNotIn("unparsed", vl)
+        self.assertEqual(vl["external_file_reference"], {"name": "Backend", "id": "1"})
+        self.assertEqual(vl["paths"], ["file:Backend"])
+        self.assertEqual(vl["external_value_list"], {"id": "4", "name": "Status_codes"})
+        self.assertEqual((vl["resolved_via"], vl["matched_path"]), ("path", "file:Backend"))
+        self.assertNotIn("value list 'Statuses'", self.err.getvalue())
 
     def test_external_file_is_kept_and_resolved(self):
         vl = self.vlists["Statuses"]

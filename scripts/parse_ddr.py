@@ -1008,9 +1008,7 @@ class DDRFile:
 
             # A list that takes its values from another file carries a
             # <FileReference>, as a TO or Perform Script step does. The merger
-            # resolves it. The real DDRs seen so far hold only Custom and Field
-            # sources, so where FileMaker puts this element is unconfirmed:
-            # search the whole ValueList.
+            # resolves it. For an unknown source, search the whole ValueList.
             file_ref = next(vl.iter("FileReference"), None)
             if file_ref is not None:
                 v["external_file"] = file_ref.get("name", "")
@@ -1047,11 +1045,30 @@ class DDRFile:
                     if rel_table is not None:
                         v["show_related_from"] = rel_table.get("name", "")
 
+            elif source_type == "External":
+                # The values of a value list in another file. Real shape
+                # (FileMaker 22, issue #7):
+                #   <Source value="External"/>
+                #   <External>
+                #     <FileReference id name><UniversalPathList>file:…</UniversalPathList></FileReference>
+                #     <ValueList id name/>   <- the list in the other file
+                #   </External>
+                v["type"] = "external"
+                ext = vl.find("External")
+                fr = ext.find("FileReference") if ext is not None else None
+                if fr is not None:
+                    v["external_file_reference"] = {"name": fr.get("name", ""), "id": fr.get("id", "")}
+                    paths = reference_paths(fr)
+                    if paths:
+                        v["paths"] = paths
+                inner = ext.find("ValueList") if ext is not None else None
+                if inner is not None:
+                    v["external_value_list"] = {"id": inner.get("id"), "name": inner.get("name")}
+
             else:
-                # Unseen source type (for example External, which takes the
-                # values of a value list in another file). Its XML shape is not
-                # known, so keep only structure -- attributes and element names,
-                # no text -- and flag the list for manual review.
+                # Unseen source type. Its XML shape is not known, so keep only
+                # structure -- attributes and element names, no text -- and
+                # flag the list for manual review.
                 v["unparsed"] = True
                 v["source"] = {
                     "attributes": dict(source.attrib) if source is not None else {},
@@ -1636,9 +1653,12 @@ class DDRMerger:
             for vl in ddr.value_lists:
                 vl = dict(vl)
                 if "external_file" in vl:
-                    info = self.resolve_external_ref_info(ddr.source_file, vl["external_file"])
+                    info = self.resolve_external_ref_info(
+                        ddr.source_file, vl["external_file"], vl.get("paths"))
                     vl["resolved_source_file"] = info["resolved_to"]
                     vl["resolved_via"] = info["resolved_via"]
+                    if "matched_path" in info:
+                        vl["matched_path"] = info["matched_path"]
                     if info["resolved_to"] is None:
                         vl["unresolved"] = True
                     if info.get("ambiguous_candidates"):

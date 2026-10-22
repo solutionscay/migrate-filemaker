@@ -477,17 +477,44 @@ When `ShowRelated value="True"`, the list filters to records related through a s
 external TO, the base table file is the resolved other file, or `null` when the
 reference does not resolve.
 
+### Values from another file (External)
+
+```xml
+<ValueList id="2" name="Statuses">
+  <Source value="External"/>
+  <External>
+    <FileReference id="1" name="Backend">
+      <UniversalPathList>file:Backend</UniversalPathList>
+    </FileReference>
+    <ValueList id="4" name="Status_codes"/>
+  </External>
+</ValueList>
+```
+
+**Evidence:** this shape is confirmed from a real FileMaker 22.0.7 DDR. The
+comment on issue #7 shows the tag and attribute names verbatim: 3 lists, all
+with this shape. Names above are placeholders. In those 3 lists the
+`FileReference` `id` and `name` match an entry of the file's own
+`ExternalDataSourcesCatalog`. The path is the text of a `UniversalPathList`
+child, not a `pathList` attribute. The inner `<ValueList>` names the list in the
+other file. Nobody has checked that its id matches there, because that file was
+not in the parse.
+
+The parser emits `type: "external"`, `external_file` (the data-source name),
+`external_file_reference` (`{name, id}`), `paths` (from `UniversalPathList`) and
+`external_value_list` (`{id, name}`). The merger resolves the list through its
+own `paths` first, then through the data source of that name, then by name
+(`resolved_source_file`, `resolved_via`, `matched_path`, `unresolved`,
+`ambiguous_candidates`). It lists an unresolved one in `00_topology.json`
+`unresolved_references` with `type: value_list`.
+
 ### Other sources
 
 Every value list has a `type`: the `<Source value>` in lower case (`custom`,
-`field`, or whatever else appears), or `unknown` when `<Source>` is missing.
+`field`, `external`, or whatever else appears), or `unknown` when `<Source>` is
+missing.
 
-**Evidence:** the real multi-file DDRs checked so far hold only `Custom` and
-`Field` sources, and `<Source>` carries only the `value` attribute. A list that
-takes its values from another file (`Source value="External"` in the synthetic
-test) has not been seen in a real DDR. Its XML shape is unconfirmed.
-
-For any other source the parser:
+For any source other than Custom, Field and External the parser:
 - sets `unparsed: true` and prints a warning;
 - keeps structure only: `source.attributes` (the `<Source>` attributes),
   `source.children` (its child element names) and `elements` (the other child
@@ -604,9 +631,9 @@ ODBC sources indicate the FM solution connects to an external SQL database. Thes
 
 ### Cross-file resolution
 
-Table occurrences (`external_file_reference`), Perform Script steps (`external_file` param) button Perform Script calls (`external_file` on the button) and value lists (`external_file`, shape unconfirmed, see Value Lists) name a data source, not a file. The merger resolves each data source of each file like this:
+Table occurrences (`external_file_reference`), Perform Script steps (`external_file` param) button Perform Script calls (`external_file` on the button) and External value lists (`external_file`, see Value Lists) name a data source, not a file. The merger resolves each data source of each file like this:
 
-1. Try each `paths` entry in order. Take the file name after the last `/` (`fmnet:/*/Data` → `Data`) and match it to a parsed file: exact file name, then the name without its FM extension, then the same case-insensitively. The first entry that matches wins (`resolved_via: "path"`, `matched_path`).
+1. Try each `paths` entry in order. A value list's own `paths` come first. Take the file name after the last `/` (`fmnet:/*/Data` → `Data`) and match it to a parsed file: exact file name, then the name without its FM extension, then the same case-insensitively. The first entry that matches wins (`resolved_via: "path"`, `matched_path`).
 2. Only when no path entry matches, match the data-source name the same way (`resolved_via: "name_fallback"`).
 3. When one tier matches more than one parsed file (for example `Data.fmp12` and `data.fp7` for `DATA`), the reference is left unresolved and listed with `ambiguous_candidates` in `unresolved_references`. The parser never picks one, and candidates are listed in sorted order so the output does not depend on `PYTHONHASHSEED`.
 
