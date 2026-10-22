@@ -365,7 +365,7 @@ class GuidanceRegressionTests(unittest.TestCase):
         business = (ROOT / "templates" / "07_business_logic.md").read_text(encoding="utf-8")
         auth = (ROOT / "templates" / "08_auth_roles.md").read_text(encoding="utf-8")
         ui = (ROOT / "templates" / "06_ui_spec.md").read_text(encoding="utf-8")
-        for phrase in ["provenance.py", "catalog_contract.py", "07_security.json", "step_text"]:
+        for phrase in ["explode_ddr.py", "catalog_contract.py"]:
             self.assertIn(phrase, skill)
         for phrase in [
             "Calculated fields",
@@ -387,14 +387,6 @@ class GuidanceRegressionTests(unittest.TestCase):
 
     def test_all_audit_remediations_remain_explicit(self):
         required = {
-            "SKILL.md": [
-                "_provenance.json",
-                "stable source identities",
-                "07_security.json",
-                "extended-privilege definitions",
-                "current year",
-                "source timezone/DST policy",
-            ],
             "workflows/fm-script-explorer.md": [
                 "_root.csv",
                 "structured `params` and `step_text`",

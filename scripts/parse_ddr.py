@@ -64,7 +64,8 @@ _redaction_count = 0
 
 
 _QUOTED_RE = re.compile(r'"([^"]{4,})"')
-_SECRET_NAME_RE = re.compile(_SECRET_KEYWORD, re.I)
+# Variable, field and function names also use short forms: $pw, $pass, g_pw.
+_SECRET_NAME_RE = re.compile(_SECRET_KEYWORD + r"|(?:^|[^a-z])(?:pw|pass)(?:[^a-z]|$)", re.I)
 
 
 def redact_secrets(text):
