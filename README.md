@@ -2,62 +2,52 @@
 
 ![migrate-filemaker: from a FileMaker DDR to a verified, documented rebuild plan](assets/banner.png)
 
-An evidence-first coding-agent skill for recovering FileMaker behavior from Database Design Report XML and planning a verifiable rebuild.
-
-It includes a standard-library Python parser, provenance and explorer-coverage gates, FileMaker semantic references, workflow guides, and migration artifact templates.
+A coding-agent skill for FileMaker rebuilds. It reads a FileMaker Database Design Report (DDR) as XML and produces a rebuild plan. Each conclusion in the plan links back to the XML.
 
 ## Requirements
 
-- A coding agent that supports project/personal skills
-- Python 3
-- The complete FileMaker DDR XML export set, including `Summary.xml` when available
+- A coding agent that supports skills (Claude Code, Codex, or similar)
+- Python 3, standard library only
+- The full DDR XML export: one file per FileMaker file, plus `Summary.xml` when you have it
 
-Raw DDR XML can contain sensitive logic or credential literals. Keep it out of version control and do not paste secrets into generated documents.
+Raw DDR XML can contain credentials and client logic. Keep it out of version control.
 
 ## Install
 
-Clone or vendor this directory into the skill location supported by your coding agent. Invoke it as `$migrate-filemaker` where supported, or ask the agent to load `SKILL.md` from this directory.
+Clone this directory into your agent's skills folder. Invoke it as `$migrate-filemaker`, or tell the agent to load `SKILL.md`.
 
 ## Process
 
-1. **Prove inputs**: run the parser regression suite, parse all DDR report files, and bind raw XML, parser, topology, and JSON specs with `_provenance.json`.
-2. **Inventory and explore**: analyze every populated source catalog. Explorer state uses stable source identities and exact-set reconciliation, not array positions or directory existence.
-3. **Discover decisions**: ask for business, identity, UI, data, integration, and operational context that the artifacts cannot establish.
-4. **Design contracts**: produce evidence-linked schema, server/API, UI, business-logic, authorization, migration, and cutover artifacts.
-5. **Audit completion**: trace high-risk conclusions back to raw XML/screenshots, run negative authorization tests, and validate migrated values beyond row counts.
+1. Parse: convert the DDR XML into JSON specs, and record provenance so stale specs are caught.
+2. Explore: classify every script, calculation, custom function, conditional format, and hide rule. A coverage check proves that each one is classified exactly once.
+3. Discover: ask the owner what the XML cannot tell you: business rules, users, integrations, operations.
+4. Design: write the schema, API, UI, business logic, authorization, data migration, and cutover plan.
+5. Audit: check high-risk conclusions against the raw XML, test authorization, and compare migrated data values as well as row counts.
 
-The workflow does not guarantee that parsed layout JSON is a complete UI specification, that every FileMaker relationship is a foreign key, or that a generated document is correct because it is well formed. Missing semantics remain explicit blockers or product decisions.
+`SKILL.md` has the full process.
 
-## Configure paths
-
-The skill does not assume `ddr/specs` or `migration/`. Set paths once for the repository:
+## Scripts
 
 ```bash
-SKILL_DIR="/path/to/migrate-filemaker"
-RAW_DIR="/path/to/implementation/raw"
-SPECS_DIR="/path/to/implementation/specs"
-ANALYSIS_DIR="/path/to/implementation/analysis"
-CORE_DIR="/path/to/canonical/core"
+python3 scripts/parse_ddr.py RAW_DIR [SPECS_DIR]        # DDR XML -> JSON specs
+python3 scripts/provenance.py {create,verify} ...       # bind raw XML, parser and specs
+python3 scripts/catalog_contract.py {snapshot,verify} ... # explorer coverage check
 ```
 
-See `SKILL.md` for the complete process.
+The parser handles multi-file solutions. It resolves references between files through each external data source's path. It stops if two inputs have the same FileMaker file name. It redacts credentials it finds in the XML.
 
-## Verify this package
+## Layout
+
+- `scripts/`: parser, provenance, and coverage tools
+- `workflows/`: step-by-step guides for each explorer, the schema, and the UI
+- `reference/`: DDR XML format, FileMaker concepts, translation patterns
+- `templates/`: the migration documents the process fills in
+
+## Tests
 
 ```bash
 python3 -m unittest discover -s tests
 ```
-
-The suite is standard-library-only. It guards parser semantic fixtures, provenance invalidation, stable explorer identities, root-script coverage, exact-set classification checks, and high-risk guidance contracts.
-
-## Resources
-
-- `scripts/parse_ddr.py`: DDR parser with extraction self-check and credential-literal redaction
-- `scripts/provenance.py`: raw/parser/spec/topology provenance create/verify gate
-- `scripts/catalog_contract.py`: stable explorer source snapshots and exact-set coverage verifier
-- `reference/`: FileMaker/XML/translation methodology
-- `workflows/`: script, calculation, function, formatting, hide, schema, and UI workflows
-- `templates/`: evidence-bounded migration artifacts
 
 ## License
 
