@@ -20,7 +20,7 @@ python3 "$SKILL_DIR/scripts/catalog_contract.py" snapshot \
   --objects "$OBJECTS" --kind scripts --output "$CATALOG"
 ```
 
-Repeat `--kind` for an explorer that covers several kinds. The catalog has one entry per index row:
+Repeat `--kind` for an explorer that covers several kinds. A kind the solution does not have is noted and skipped. The catalog has one entry per index row:
 
 - `source_id`: the object file path relative to `objects/` (`<file>/<kind>/<id>-<name>.txt`).
 - `source_hash`: the row's `sha256`.

@@ -47,14 +47,17 @@ def read_index(objects: Path) -> list[dict[str, str]]:
         return list(reader)
 
 
+def absent_kinds(objects: Path, kinds: list[str]) -> list[str]:
+    present = {row["kind"] for row in read_index(objects)}
+    if not present & set(kinds):
+        raise ValueError(
+            f"no kind in index: {', '.join(kinds)}; index has {', '.join(sorted(present))}"
+        )
+    return [kind for kind in kinds if kind not in present]
+
+
 def build_entries(objects: Path, kinds: list[str], batch_size: int) -> list[dict[str, Any]]:
     rows = read_index(objects)
-    present = {row["kind"] for row in rows}
-    unknown = [kind for kind in kinds if kind not in present]
-    if unknown:
-        raise ValueError(
-            f"kind not in index: {', '.join(unknown)}; index has {', '.join(sorted(present))}"
-        )
     entries: list[dict[str, Any]] = []
     batches: Counter[str] = Counter()
     for row in rows:
@@ -84,6 +87,8 @@ def build_entries(objects: Path, kinds: list[str], batch_size: int) -> list[dict
 def snapshot(args: argparse.Namespace) -> int:
     objects = args.objects.resolve()
     kinds = sorted(set(args.kind))
+    for kind in absent_kinds(objects, kinds):
+        print(f"note: no {kind} objects in this solution")
     entries = build_entries(objects, kinds, args.batch_size)
     payload = {
         "format_version": FORMAT_VERSION,

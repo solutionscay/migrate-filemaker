@@ -235,9 +235,11 @@ class CatalogContractTests(unittest.TestCase):
             self.assertEqual(catalog["count"], 3)
             self.assertEqual(self.verify(output, self.write_csvs(root, catalog["entries"])), 0)
 
-    def test_unknown_kind_is_refused(self):
+    def test_absent_kind_is_noted_and_no_present_kind_is_refused(self):
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ValueError, "kind not in index"):
+            _, catalog = self.snapshot(Path(directory), ["tables", "auth-files"])
+            self.assertEqual(catalog["count"], 1)
+            with self.assertRaisesRegex(ValueError, "no kind in index"):
                 self.snapshot(Path(directory), ["layouts"])
 
     def test_coverage_rejects_missing_duplicate_and_changed_rows(self):
