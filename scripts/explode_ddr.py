@@ -10,49 +10,95 @@ object tree, table occurrences with their relationships, and every other catalog
 rendered generically, so a catalog this script has never heard of still lands on
 disk instead of vanishing.
 
-Presentation-only elements (CSS, number/date formats, character styles) are left
-out. Logic is never left out: every <Calculation> in the raw XML must show up in
-some object file, and the run fails loudly when the counts disagree.
+Only presentation is left out (CSS, fonts, character styles, theme definitions).
+The run checks its own coverage and fails loudly when:
+  - a <Calculation> was not shown (its text, or proof that the step text shows it);
+  - an element, attribute or text class of the raw XML reached no object file and
+    is not on the presentation list below;
+  - a credential value from the raw XML is still in some object file.
 
 Output:
     OUT_DIR/<file-slug>/<kind>/<id>-<name>.txt
-    OUT_DIR/index.tsv     one row per object: file, kind, id, name, folder, path, sha256, lines
+    OUT_DIR/index.tsv       one row per object: file, kind, id, name, folder, path, sha256, lines
+    OUT_DIR/unresolved.tsv  every reference to an id that is 0, deleted, or outside the DDR set
+    OUT_DIR/LEGEND.md       the markers and codes used in the object files
 """
 
+import fnmatch
 import hashlib
 import os
 import re
 import sys
-import xml.etree.ElementTree as ET
-from collections import Counter
+from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import parse_ddr  # noqa: E402
 from parse_ddr import (  # noqa: E402
-    find_ddr_reports, looks_like_secret_target, parse_xml, redact_all_literals, redact_secrets,
+    REDACTION_PLACEHOLDER, _strip_fm_extension, find_ddr_reports, looks_like_secret_target,
+    looks_like_token, parse_xml, path_target_name, redact_all_literals, redact_secrets,
+    redact_value_literals, reference_paths, secret_spans, value_literal_spans,
 )
 
-# Subtrees that carry only presentation. Never put a logic element here.
+# Subtrees the generic walk does not print. Each is either presentation or read by a
+# special case: DDRInfo and ExtendedAttributes by FieldObj/TextObj, Styles for the
+# style name, Theme for the layout header, DisplayCalculation for the refs line.
 SKIP = {
     "Styles", "LocalCSS", "FullCSS", "ExtendedAttributes", "NumFormat", "DateFormat", "TimeFormat",
     "CharacterStyleVector", "ParagraphStyleVector", "CharacterStyle", "ParagraphStyle",
     "DDRInfo", "Theme", "LocalTheme", "CustomStyles", "RenderFormat", "ThemeCatalog",
-    "DisplayCalculation",  # structured copy of <Calculation>; rendered as a refs line instead
+    "DisplayCalculation",
 }
+# Subtrees the coverage census does not walk: theme definitions (CSS only) and the
+# chunked copy of each calculation, which the refs line reads.
+UNREAD = {"ThemeCatalog", "DisplayCalculation", "CharacterStyle", "ParagraphStyleVector",
+          "LocalTheme", "LocalCSS", "FullCSS", "RenderFormat"}
+# Raw classes (Parent/Tag, Parent/Tag@attr, Parent/Tag#text) the coverage census does
+# not require in the output. Presentation only; never put logic here.
+PRESENTATION = [
+    "*/CharacterStyleVector@*", "CharacterStyleVector/Style", "CharacterStyleVector/Style@*",
+    "Style/Data@*", "Styles/CustomStyles", "*/Styles",
+    "Layout/Theme@*", "DefaultTheme/Theme*", "*/ExtendedAttributes@fontHeight", "*/ExtendedAttributes@graphicFormat",
+    "*/NumFormat@charStyle", "*/DateFormat@charStyle", "*/TimeFormat@charStyle",
+    "FMPReport@*", "/FMPReport",
+]
 # Field options whose "False" is the default; a False value says nothing.
 FIELD_OPTION_TAGS = {"AutoEnter", "Validation", "Storage", "NotEmpty", "Unique", "Existing",
                      "StrictValidation", "MaxDataLength"}
 KEEP_FALSE = {"storeCalculationResults", "allowEditing", "enable"}
+# An option flag that is False while its child still holds a setting: the child is inactive.
+INACTIVE_CHILD = {"calculation": "Calculation", "lookup": "Lookup", "constant": "ConstantData",
+                  "valuelist": "ValueList", "maxLength": "MaxDataLength"}
 
+# Codes with a meaning read from the data (see LEGEND.md). Unknown values stay raw.
+DECODE = {
+    ("FieldObj", "displayType"): {"0": "edit box", "1": "drop-down list", "2": "pop-up menu",
+                                  "3": "checkbox set", "4": "radio button set", "6": "drop-down calendar"},
+}
+BITS = {
+    ("Trigger", "triggerFlags"): {1: "browse", 2: "find", 4: "preview"},
+}
+# Codes printed raw. LEGEND.md lists every value seen, so an agent knows what exists.
+CODES = [
+    ("Object", "flags"), ("FieldObj", "flags"), ("FieldObj", "inputMode"), ("FieldObj", "keyboardType"),
+    ("FieldObj", "pictFormat"), ("FieldObj", "tableViewVisibility"), ("TextObj", "flags"),
+    ("ButtonObj", "buttonFlags"), ("ButtonObj", "displayType"), ("PortalObj", "portalFlags"),
+    ("TabControlObj", "tabFlagSet"), ("TabControlObj", "tabJustification"),
+    ("SlideControlObj", "slideFlagSet"), ("PopoverObj", "position"), ("ExternalObj", "externalFlagSet"),
+    ("Condition", "op"), ("Item", "flags"), ("Encryption", "type"), ("Shortcut", "key"),
+    ("Shortcut", "modifier"), ("NewWndStyles", "Styles"), ("NumFormat", "flags"),
+    ("DateFormat", "format"), ("TimeFormat", "flags"),
+] + list(DECODE) + list(BITS)
+CODE_SET = set(CODES)
+LEGEND_VALUES = 20  # most common values listed per code in LEGEND.md
 
-def css_props(el):
-    """Property lines of every LocalCSS under el, as one compact string."""
-    props = []
-    for css in el.iter("LocalCSS"):
-        for ln in (css.text or "").splitlines():
-            ln = ln.strip()
-            if ln.endswith(";"):
-                props.append(ln)
-    return " ".join(props)
+SINGULAR = {
+    "tables": "table", "table-occurrences": "table occurrence", "relationships": "relationship",
+    "layouts": "layout", "scripts": "script", "value-lists": "value list", "accounts": "account",
+    "privilege-sets": "privilege set", "extended-privileges": "extended privilege",
+    "auth-files": "auth file", "custom-functions": "custom function", "data-sources": "data source",
+    "custom-menu-sets": "custom menu set", "custom-menus": "custom menu",
+    "base-directories": "base directory", "file": "file",
+}
 
 CATALOG_KIND = {
     "BaseTableCatalog": "tables",
@@ -71,157 +117,546 @@ CATALOG_KIND = {
     "BaseDirectoryCatalog": "base-directories",
 }
 
+# Tags whose value is a user name: masked where it is set, but not hunted elsewhere.
+USER_TAGS = {"Username", "UserName", "SMTPUserName", "AccountName"}
+_LINE_BREAK = re.compile("\r\n?|[\n\x0b\x0c\x1c-\x1e\x85\u2028\u2029]")
+_IDENT = re.compile(r"[A-Za-z_][\w.]*")
+
 
 def slug(value, limit=60):
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", (value or "").strip()).strip("._")
     return cleaned[:limit] or "unnamed"
 
 
-class Renderer:
-    """Turn an element subtree into indented lines; count every calculation emitted."""
+def lines_of(text):
+    """Split on every line break a reader may honour (CR, LF, CRLF, VT, FF ...)."""
+    return _LINE_BREAK.sub("\n", text or "").split("\n")
 
-    def __init__(self):
-        self.seen = set()  # ids of rendered <Calculation> elements; copies count once
+
+def one_line(text):
+    """FileMaker's own ¶ for a line break inside a single-line value."""
+    return _LINE_BREAK.sub("¶", text or "")
+
+
+def norm(text):
+    """Whitespace- and quote-insensitive form, to test whether StepText shows a calculation."""
+    text = (text or "").replace("“", '"').replace("”", '"').replace("…", "")
+    return re.sub(r"\s+", "", text)
+
+
+def _q(v):
+    v = one_line(v)
+    return f'"{v}"' if (v == "" or " " in v) else v
+
+
+def css_props(el):
+    """Property lines of every LocalCSS under el, as one compact string."""
+    props = []
+    for css in el.iter("LocalCSS"):
+        for ln in lines_of(css.text):
+            ln = ln.strip()
+            if ln.endswith(";"):
+                props.append(ln)
+    return " ".join(props)
+
+
+class Catalog:
+    """Ids of one <File>, read before rendering so references can be checked."""
+
+    def __init__(self, file_el):
+        self.el = file_el
+        self.name = file_el.get("name") or ""
+        self.slug = slug(self.name, 80)
+        self.stem = _strip_fm_extension(self.name).lower()
+        self.tables, self.fields = {}, defaultdict(set)
+        for t in file_el.iterfind("BaseTableCatalog/BaseTable"):
+            self.tables[t.get("id")] = t.get("name")
+            for f in t.iter("Field"):
+                self.fields[t.get("id")].add(f.get("id"))
+        self.tos = {t.get("name"): t for t in file_el.iterfind("RelationshipGraph/TableList/Table")}
+        self.to_ids = {t.get("id") for t in self.tos.values()}
+        self.scripts, self.script_seps = self._items("ScriptCatalog", "Script", "StepList/Step")
+        self.layouts, self.layout_seps = self._items("LayoutCatalog", "Layout", ".//Object")
+        self.data_sources = {}
+        for ds in file_el.iterfind("ExternalDataSourcesCatalog/*"):
+            self.data_sources[ds.get("id")] = ds
+        self.ids = {
+            "ValueList": {v.get("id") for v in file_el.iterfind("ValueListCatalog/ValueList")},
+            "CustomMenu": {m.get("id") for m in file_el.iterfind("CustomMenuCatalog/CustomMenu")},
+            "CustomMenuSet": {m.get("id") for m in file_el.iterfind("CustomMenuSetCatalog/CustomMenuSet")},
+            "PrivilegeSet": {p.get("id") for p in file_el.iterfind("PrivilegesCatalog/PrivilegeSet")},
+            "BaseTable": set(self.tables),
+        }
+
+    def _items(self, cat_tag, item_tag, content):
+        ids, seps = set(), set()
+        cat = self.el.find(cat_tag)
+        if cat is not None:
+            for it in cat.iter(item_tag):
+                if it.get("name") == "-" and it.find(content) is None:
+                    seps.add(it.get("id"))
+                else:
+                    ids.add(it.get("id"))
+        return ids, seps
+
+    def table_path(self, table_id):
+        return f"{self.slug}/tables/{table_id}-{slug(self.tables.get(table_id))}.txt"
+
+
+class Renderer:
+    """Turn an element subtree into indented lines; record what each raw class reached."""
+
+    def __init__(self, ex):
+        self.ex = ex
+        self.cat = None
+        self.parent = {}
+        self.seen = set()       # ids of <Calculation> elements whose text is shown
+        self.reached = set()    # raw classes that reached output
+        self.codes = defaultdict(Counter)
+        self.step_text = ""     # normalized StepText of the step being rendered
+        self.unresolved = []    # (tag, id, name, status) for the object being rendered
 
     @property
     def calcs(self):
         return len(self.seen)
+
+    def key(self, el):
+        p = self.parent.get(el)
+        return f"{p.tag if p is not None else ''}/{el.tag}"
+
+    def mark(self, el, attrs=(), text=False):
+        k = self.key(el)
+        self.reached.add(k)
+        for a in attrs:
+            self.reached.add(f"{k}@{a}")
+        if text:
+            self.reached.add(f"{k}#text")
 
     def refs(self, display):
         """One compact line from a <DisplayCalculation>: fields, functions, custom functions."""
         out = []
         for chunk in display.iter("Chunk"):
             kind = chunk.get("type")
+            text = (chunk.text or "").strip()
             if kind == "FieldRef":
                 f = chunk.find("Field")
                 if f is not None:
                     tbl = f.get("table") or ""
                     out.append(f"{tbl}::{f.get('name')}#{f.get('id')}" if tbl else f"{f.get('name')}#{f.get('id')}")
             elif kind == "CustomFunctionRef":
-                out.append(f"cf:{(chunk.text or '').strip()}")
+                out.append(f"cf:{text}")
             elif kind == "FunctionRef":
-                out.append(f"fn:{(chunk.text or '').strip()}")
-            elif kind in ("VariableReference", "TableOccurrenceRef") or kind not in ("NoRef", None):
-                out.append(f"{kind}:{(chunk.text or '').strip()}")
-        seen, uniq = set(), []
-        for r in out:
-            if r not in seen:
-                seen.add(r)
-                uniq.append(r)
-        return uniq
+                # The DDR types a // comment // as FunctionRef too; the comment is in the text.
+                if _IDENT.fullmatch(text):
+                    out.append(f"fn:{text}")
+            elif kind not in ("NoRef", None):
+                out.append(f"{kind}:{one_line(text)}")
+        return list(dict.fromkeys(out))
 
-    def calc(self, el, parent, depth, secret, show_text=True):
+    def calc(self, el, parent, depth, secret, show_text=True, inactive=False):
         self.seen.add(id(el))
+        self.mark(el, el.attrib, text=True)
         pad = "  " * depth
         display = parent.find("DisplayCalculation") if parent is not None else None
         refs = self.refs(display) if display is not None else []
-        if not show_text:
+        raw = (el.text or "").rstrip()
+        if not show_text and norm(raw) in self.step_text:
             # The step line already shows this calculation; keep only what it cannot show:
             # which field (by id), custom function or table occurrence it touches.
             refs = [r for r in refs if not r.startswith("fn:")]
             return [f"{pad}refs: {', '.join(refs)}"] if refs else []
-        attrs = " ".join(f"{k}={v}" for k, v in el.attrib.items())
-        lines = [f"{pad}Calculation{(' ' + attrs) if attrs else ''}:"]
-        text = (el.text or "").rstrip()
-        text = redact_all_literals(text) if secret else redact_secrets(text)
-        for ln in text.splitlines() or [""]:
+        attrs = " ".join(f"{k}={_q(v)}" for k, v in el.attrib.items())
+        flag = " (inactive)" if inactive else ""
+        lines = [f"{pad}Calculation{(' ' + attrs) if attrs else ''}{flag}:"]
+        text = redact(raw, secret)
+        for ln in lines_of(text) if text else [""]:
             lines.append(f"{pad}  | {ln}")
         if refs:
             lines.append(f"{pad}  refs: {', '.join(refs)}")
         return lines
 
-    def element(self, el, depth=0, secret=False, calc_text=True, parent=None):
+    # ── references ───────────────────────────────────────────────────────────
+
+    def ref_status(self, el, parent):
+        """None when the reference resolves; else none / missing / separator / external."""
+        tag, oid, name = el.tag, el.get("id"), el.get("name")
+        cat = self.cat
+        if tag in ("Script", "Layout", "ValueList") and parent is not None:
+            fr = parent.find("FileReference")
+            if fr is not None:
+                cat = self.ex.data_source_file(self.cat, fr.get("id"))
+                if cat is None:
+                    return "external"
+        if tag == "Field" and "table" in el.attrib:
+            if oid == "0":
+                return "none"
+            if not el.get("table"):
+                return None if name else "missing"
+            target = self.ex.base_table(self.cat, el.get("table"))
+            if target is None:
+                return "missing"
+            if target == "external":
+                return "external"
+            tcat, btid = target
+            return None if oid in tcat.fields.get(btid, ()) else "missing"
+        if oid is None:
+            return None
+        if tag == "Script":
+            ids, seps = cat.scripts, cat.script_seps
+        elif tag == "Layout":
+            ids, seps = cat.layouts, cat.layout_seps
+        elif tag == "Table" and parent is not None and parent.tag != "TableList":
+            ids, seps = cat.to_ids, set()
+        elif tag == "FileReference":
+            ids, seps = set(cat.data_sources), set()
+        elif tag in cat.ids:
+            ids, seps = cat.ids[tag], set()
+        else:
+            return None
+        if oid == "0":
+            return "none"
+        if oid in seps:
+            return "separator"
+        return None if oid in ids else "missing"
+
+    def side_attrs(self, to_name):
+        """to=<id> base=<table file> for one side of a relationship."""
+        to = self.cat.tos.get(to_name)
+        if to is None:
+            return {"ref": "missing"}
+        return {"to": to.get("id"), "base": self.ex.base_label(self.cat, to_name)}
+
+    # ── element rendering ────────────────────────────────────────────────────
+
+    def attrs(self, el, parent):
+        """The attributes to print, with defaults dropped, codes decoded and line breaks as ¶."""
+        tag = el.tag
+        self.mark(el, el.attrib)
+        attrs = {}
+        for k, v in el.attrib.items():
+            if k in ("rotation", "flags") and v == "0":
+                continue
+            if tag in FIELD_OPTION_TAGS and v == "False" and k not in KEEP_FALSE \
+                    and INACTIVE_CHILD.get(k) not in self.inactive_children(el):
+                continue
+            if k == "Parameter" and el.find("Calculation") is not None:
+                continue  # the Calculation child shows the same parameter
+            if (tag, k) in CODE_SET:
+                self.codes[(tag, k)][v] += 1
+            if (tag, k) in DECODE and v in DECODE[(tag, k)]:
+                v = f"{v}({DECODE[(tag, k)][v].replace(' ', '-')})"
+            elif (tag, k) in BITS and v.isdigit():
+                names = [n for b, n in BITS[(tag, k)].items() if int(v) & b]
+                if int(v) & ~sum(BITS[(tag, k)]):
+                    names.append("?")
+                v = f"{v}({'+'.join(names)})"
+            attrs[k] = redact_secrets(v)
+        if tag == "Validation" and el.get("valuelist") == "True" and el.find("ValueList") is None:
+            attrs["valuelist"] = "True(list-not-named-in-DDR)"
+        style = el.find("Styles/CustomStyles/Name")
+        if style is not None and (style.text or "").strip():
+            self.mark(style, text=True)
+            attrs["style"] = style.text.strip()
+        bounds = el.find("Bounds")
+        if bounds is not None:
+            self.mark(bounds, bounds.attrib)
+            attrs["bounds"] = ",".join(
+                str(round(float(bounds.get(s, 0)))) for s in ("top", "left", "bottom", "right"))
+        if tag in ("LeftTable", "RightTable") and el.get("name") is not None:
+            attrs.update(self.side_attrs(el.get("name")))
+        return attrs
+
+    def inactive_children(self, el):
+        """Tags of the children of a field option that hold a setting while the option is off."""
+        if el.tag not in FIELD_OPTION_TAGS:
+            return set()
+        off = set()
+        for k, v in el.attrib.items():
+            child = el.find(INACTIVE_CHILD.get(k, "-"))
+            if v == "False" and child is not None and (len(child) or (child.text or "").strip()):
+                off.add(child.tag)
+        if el.get("constant") == "True":
+            off.discard("Calculation")  # the DDR mirrors a constant as a Calculation
+        return off
+
+    def display_formats(self, el):
+        """One line of the number, date and time formats under el that differ from the default.
+        They sit in <ExtendedAttributes> (layout fields, merge text) or directly (chart axes)."""
+        ext = el.find("ExtendedAttributes")
+        if ext is None:
+            ext = el
+        else:
+            self.mark(ext, ext.attrib)
+        if ext.find("NumFormat") is None and ext.find("DateFormat") is None and ext.find("TimeFormat") is None:
+            return None
+        parts = []
+        num = ext.find("NumFormat")
+        if num is not None:
+            self.mark(num, num.attrib)
+            self.codes[("NumFormat", "flags")][num.get("flags")] += 1
+            if num.get("flags") not in ("0", "2304"):
+                a = dict(num.attrib)
+                a.pop("charStyle", None)
+                for k in ("thousandsSep", "decimalPoint"):
+                    a[k] = _char(a.get(k))
+                parts.append("number " + " ".join(f"{k}={_q(v)}" for k, v in a.items()))
+        date = ext.find("DateFormat")
+        if date is not None:
+            self.mark(date, date.attrib)
+            self.codes[("DateFormat", "format")][date.get("format")] += 1
+            for e in date:
+                self.mark(e, e.attrib, text=True)
+            if date.get("format") != "0":
+                a = {k: v for k, v in date.attrib.items() if k != "charStyle"}
+                a["separator"] = _char(a.get("separator"))
+                elems = ",".join(e.text or "" for e in date.iter("DateElement"))
+                seps = "|".join(e.text or "" for e in date.iter("DateElementSep"))
+                parts.append("date " + " ".join(f"{k}={_q(v)}" for k, v in a.items())
+                             + f" elements={elems} separators={_q(seps)}")
+        time = ext.find("TimeFormat")
+        if time is not None:
+            self.mark(time, time.attrib)
+            self.codes[("TimeFormat", "flags")][time.get("flags")] += 1
+            if time.get("flags") not in ("0", "143"):
+                a = {k: v for k, v in time.attrib.items() if k != "charStyle"}
+                a["separator"] = _char(a.get("separator"))
+                parts.append("time " + " ".join(f"{k}={_q(v)}" for k, v in a.items()))
+        return "Display: " + "; ".join(parts) if parts else None
+
+    def field_obj_lines(self, el, pad):
+        """Field and value list of a layout field, with ids, from DDRInfo."""
+        lines = []
+        info = el.find("DDRInfo")
+        if info is None:
+            return lines, set()
+        self.mark(info)
+        f, vl = info.find("Field"), info.find("ValueList")
+        consumed = set()
+        if f is not None:
+            self.mark(f, f.attrib)
+            if el.find("Name") is not None:
+                self.mark(el.find("Name"), text=True)  # the same TO::name, without the id
+            line = f"{pad}  Field: {f.get('table')}::{f.get('name')}#{f.get('id')}"
+            if f.get("maxRepetition", "1") != "1":
+                line += f" rep={f.get('repetition')}/{f.get('maxRepetition')}"
+            line += self.ref_suffix(f, info)
+            lines.append(line)
+            consumed.add("Name")
+        if vl is not None:
+            self.mark(vl, vl.attrib)
+            if el.find("ValueList") is not None:
+                self.mark(el.find("ValueList"), text=True)
+            lines.append(f"{pad}  ValueList: {vl.get('name')}#{vl.get('id')}" + self.ref_suffix(vl, info))
+            consumed.add("ValueList")
+        return lines, consumed
+
+    def ref_suffix(self, el, parent):
+        status = self.ref_status(el, parent)
+        if status:
+            self.unresolved.append((el.tag, el.get("id"), el.get("name") or "", status))
+            return f" ref={status}"
+        return ""
+
+    def element(self, el, depth=0, secret=False, calc_text=True, parent=None, defn=False, inactive=False):
         tag = el.tag
         if tag in SKIP:
             return []
+        secret = secret or looks_like_secret_target(tag)
         if tag == "Calculation":
-            return self.calc(el, parent, depth, secret, show_text=calc_text)
+            return self.calc(el, parent, depth, secret, show_text=calc_text, inactive=inactive)
         pad = "  " * depth
+        flag = "(inactive) " if inactive else ""
         if tag == "TextObj":
             # Label text lives inside the character-style runs, which are otherwise skipped.
             runs = el.find("CharacterStyleVector")
-            label = "".join(d.text or "" for d in (runs if runs is not None else el).iter("Data")).strip()
-            sub = [ln for c in el if c.tag not in SKIP
-                   for ln in self.element(c, depth + 1, secret, calc_text, parent=el)]
-            head = [f"{pad}Text: {_q(redact_secrets(label))}"] if label else []
-            return head + sub
+            if runs is not None:
+                self.mark(runs)
+            datas = list((runs if runs is not None else el).iter("Data"))
+            for d in datas:
+                self.mark(d, text=True)
+            label = "".join(d.text or "" for d in datas).strip()
+            attrs = self.attrs(el, parent)
+            head = f"{pad}Text" + "".join(f" {k}={_q(v)}" for k, v in attrs.items())
+            label_lines = lines_of(redact_secrets(label))
+            if not label:
+                out = [head] if attrs else []
+            elif len(label_lines) == 1:
+                out = [f"{head}: {_q(label_lines[0])}"]
+            else:
+                out = [head] + [f"{pad}  | {ln}" for ln in label_lines]
+            fmt = self.display_formats(el)
+            if fmt:
+                out.append(f"{pad}  {fmt}")
+            return out + [ln for c in el if c.tag not in SKIP
+                          for ln in self.element(c, depth + 1, secret, calc_text, parent=el)]
         if tag == "Format":
             # A conditional format's effect is its CSS; 500pt text is how FileMaker hides things.
+            self.mark(el, el.attrib)
             props = css_props(el)
-            return [f"{pad}Format: {props}"] if props else []
-        attrs = {k: v for k, v in el.attrib.items()
-                 if not (k in ("rotation", "flags") and v == "0")}
-        if tag in FIELD_OPTION_TAGS:
-            attrs = {k: v for k, v in attrs.items() if v != "False" or k in KEEP_FALSE}
-        bounds = el.find("Bounds")
-        if bounds is not None:
-            attrs["bounds"] = ",".join(
-                str(round(float(bounds.get(s, 0)))) for s in ("top", "left", "bottom", "right"))
-        children = [c for c in el if c.tag not in SKIP and c.tag != "Bounds"]
+            fa = "".join(f" {k}={_q(v)}" for k, v in el.attrib.items())
+            return [f"{pad}Format{fa}: {props}"] if props or fa else []
+        if tag == "Button" and parent is not None and parent.tag == "Buttons":
+            # Show Custom Dialog: Get ( LastMessageChoice ) returns this number.
+            self.mark(el, el.attrib)
+            calc = el.find("Calculation")
+            label = ""
+            if calc is not None:
+                self.seen.add(id(calc))
+                self.mark(calc, calc.attrib, text=True)
+                label = one_line(redact(calc.text or "", secret))
+            n = list(parent).index(el) + 1
+            fa = "".join(f" {k}={_q(v)}" for k, v in el.attrib.items())
+            return [f"{pad}Button {n}{fa}: {label}" if label else f"{pad}Button {n}{fa}"]
+        if tag == "PlatformData":
+            self.mark(el, el.attrib, text=True)
+            return [f"{pad}PlatformData" + "".join(f" {k}={_q(v)}" for k, v in el.attrib.items())
+                    + f": ({len((el.text or '').strip()) // 2} bytes of printer settings, not shown)"]
+        attrs = self.attrs(el, parent)
+        if not defn:
+            status = self.ref_status(el, parent)
+            if status:
+                attrs["ref"] = status
+                self.unresolved.append((tag, el.get("id"), el.get("name") or "", status))
+            elif tag in ("Script", "Layout", "ValueList") and parent is not None \
+                    and parent.find("FileReference") is not None:
+                tcat = self.ex.data_source_file(self.cat, parent.find("FileReference").get("id"))
+                if tcat is not None and tcat is not self.cat:
+                    attrs["in"] = tcat.slug
+        pre, consumed = [], set()
+        if tag == "FieldObj":
+            pre, consumed = self.field_obj_lines(el, pad)
+        fmt = self.display_formats(el)
+        if fmt:
+            pre.append(f"{pad}  {fmt}")
+        children = [c for c in el if c.tag not in SKIP and c.tag != "Bounds" and c.tag not in consumed]
         text = (el.text or "").strip()
-        if not attrs and not text and not children:
+        if text:
+            self.mark(el, text=True)
+        if not attrs and not text and not children and not pre:
             return []
-        if tag == "Field" and not children and attrs.get("id") == "0" and not attrs.get("name"):
-            return []
-        sub = []
+        off = self.inactive_children(el)
+        sub = list(pre)
         for c in children:
-            sub += self.element(c, depth + 1, secret, calc_text, parent=el)
+            sub += self.element(c, depth + 1, secret, calc_text, parent=el, inactive=c.tag in off)
         if not attrs and not text and not sub:
             return []  # a wrapper whose content was all presentation or already shown
-        head = pad + tag + "".join(f" {k}={_q(v)}" for k, v in attrs.items())
+        head = pad + flag + tag + "".join(f" {k}={_q(v)}" for k, v in attrs.items())
         lines = []
-        if text and "\n" not in text and len(text) < 160:
-            lines.append(f"{head}: {redact_secrets(text)}")
+        text = redact(text, secret)
+        tlines = lines_of(text) if text else []
+        if len(tlines) == 1 and len(text) < 160:
+            lines.append(f"{head}: {text}")
         else:
             lines.append(head)
-            for ln in text.splitlines():
-                lines.append(f"{pad}  | {redact_secrets(ln)}")
+            for ln in tlines:
+                lines.append(f"{pad}  | {ln}")
         return lines + sub
-
-
-def _q(v):
-    return f'"{v}"' if (v == "" or " " in v) else v
 
 
 class Exploder:
     def __init__(self, out_dir):
         self.out = out_dir
-        self.r = Renderer()
+        self.r = Renderer(self)
         self.rows = []
+        self.unresolved = []
         self.counts = Counter()
+        self.catalogs = {}       # file stem (lower case) -> Catalog
+        self.secrets = set()     # raw credential values, quoted when the quotes matter
+        self.leaks = []          # (path, kind of value) for every credential that did
+        self.bad_lines = []      # paths with a line break a reader would split differently
 
     def write(self, src, kind, oid, name, folder, xpath, header_extra, body):
         rel = os.path.join(slug(src, 80), kind, f"{oid}-{slug(name)}.txt")
         path = os.path.join(self.out, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        head = [f"# {kind[:-1] if kind.endswith('s') else kind} {oid}: {name}",
-                f"# file: {src}"]
+        head = [f"# {SINGULAR.get(kind, kind)} {oid}: {one_line(name)}", f"# file: {src}"]
         if folder:
             head.append(f"# folder: {folder}")
         head.append(f"# source: {xpath}")
-        head += [f"# {h}" for h in header_extra]
+        head += [f"# {one_line(h)}" for h in header_extra]
         text = "\n".join(head + [""] + body) + "\n"
+        if len(text.splitlines()) != text.count("\n"):
+            self.bad_lines.append(rel)
+        for v in self.secrets:
+            if v in text:
+                self.leaks.append((rel, f"{len(v.strip(chr(34)))}-char value"))
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text)
         self.rows.append((src, kind, oid, name, folder, rel,
                           hashlib.sha256(text.encode()).hexdigest(), str(text.count("\n"))))
+        for row in self.r.unresolved:
+            self.unresolved.append((rel,) + row)
+        self.r.unresolved = []
         self.counts[kind] += 1
+
+    # ── cross-file resolution ────────────────────────────────────────────────
+
+    def data_source_file(self, cat, ds_id):
+        """The Catalog a data source points at, or None when it is not in this DDR set."""
+        ds = cat.data_sources.get(ds_id)
+        if ds is None:
+            return None
+        for p in reference_paths(ds):
+            target = self.catalogs.get(_strip_fm_extension(path_target_name(p)).lower())
+            if target is not None:
+                return target
+        return None
+
+    def base_table(self, cat, to_name):
+        """(Catalog, base table id) of a TO; "external" when its file is not in the set."""
+        to = cat.tos.get(to_name)
+        if to is None:
+            return None
+        fr = to.find("FileReference")
+        tcat = cat if fr is None else self.data_source_file(cat, fr.get("id"))
+        if tcat is None:
+            return "external"
+        return tcat, to.get("baseTableId")
+
+    def base_label(self, cat, to_name):
+        target = self.base_table(cat, to_name)
+        if target is None:
+            return "missing"
+        if target == "external":
+            return "external"
+        tcat, btid = target
+        return tcat.table_path(btid) if btid in tcat.tables else "missing"
 
     # ── per-catalog renderers ────────────────────────────────────────────────
 
     def tables(self, src, cat):
+        self.r.mark(cat)
         for t in cat.iter("BaseTable"):
+            self.r.mark(t, t.attrib)
+            fc = t.find("FieldCatalog")
+            if fc is not None:
+                self.r.mark(fc)
             fields = t.findall("FieldCatalog/Field") or t.findall("Field")
+            extra = [f"fields: {len(fields)}", f"records: {t.get('records')}"]
+            if (t.get("comment") or "").strip():
+                extra.append(f"comment: {t.get('comment')}")
+            if t.get("shadow") == "True":
+                extra.append("shadow: True (external SQL table)")
+            ref = t.find("DataSourceRef")
+            if ref is not None:
+                self.r.mark(ref, ref.attrib)
+                ds = next((d for d in self.r.cat.data_sources.values() if d.get("name") == ref.get("name")), None)
+                where = f"{self.r.cat.slug}/data-sources/{ds.get('id')}-{slug(ds.get('name'))}.txt" if ds is not None \
+                    else "ref=missing"
+                extra.append(f"external: data source {ref.get('name')} ({where}) "
+                             f"table {ref.get('catalogName')}.{ref.get('schemaName')}.{ref.get('tableName')}")
             body = []
             for f in fields:
                 secret = looks_like_secret_target(f.get("name"))
-                body += self.r.element(f, 0, secret)
+                body += self.r.element(f, 0, secret, defn=True)
                 body.append("")
             self.write(src, "tables", t.get("id"), t.get("name"), "",
-                       f"BaseTableCatalog/BaseTable[@id={t.get('id')}]",
-                       [f"fields: {len(fields)}"], body)
+                       f"BaseTableCatalog/BaseTable[@id={t.get('id')}]", extra, body)
 
     def occurrences(self, src, graph):
+        self.r.mark(graph)
+        for wrap in graph:
+            self.r.mark(wrap)
         rels = graph.findall("RelationshipList/Relationship")
         by_to = {}
         for rel in rels:
@@ -230,119 +665,348 @@ class Exploder:
                 if s is not None:
                     by_to.setdefault(s.get("name"), []).append(rel)
         for to in graph.findall("TableList/Table"):
-            body = self.r.element(to)
+            body = self.r.element(to, defn=True)
             mine = by_to.get(to.get("name"), [])
             body += ["", f"relationships: {len(mine)}"]
             for rel in mine:
-                body += [""] + self.r.element(rel)
+                body += [""] + self.r.element(rel, defn=True)
             self.write(src, "table-occurrences", to.get("id"), to.get("name"), "",
-                       f"RelationshipGraph/TableList/Table[@id={to.get('id')}]", [], body)
+                       f"RelationshipGraph/TableList/Table[@id={to.get('id')}]",
+                       [f"base table: {self.base_label(self.r.cat, to.get('name'))}"], body)
         # Relationships are also written once each, so a relationship is never only a copy.
         for rel in rels:
             l, r = rel.find("LeftTable"), rel.find("RightTable")
             name = f"{l.get('name') if l is not None else '?'} = {r.get('name') if r is not None else '?'}"
             self.write(src, "relationships", rel.get("id"), name, "",
                        f"RelationshipGraph/RelationshipList/Relationship[@id={rel.get('id')}]", [],
-                       self.r.element(rel))
+                       self.r.element(rel, defn=True))
+
+    def walk_groups(self, el, path, groups, item_tag, on_item):
+        for c in el:
+            if c.tag == "Group":
+                self.r.mark(c, c.attrib)
+                g = f"id={c.get('id')} " + " ".join(f"{k}={v}" for k, v in c.attrib.items()
+                                                     if k not in ("id", "name"))
+                self.walk_groups(c, f"{path} / {c.get('name')}" if path else c.get("name"),
+                                 groups + [g.strip()], item_tag, on_item)
+            elif c.tag == item_tag:
+                on_item(c, path, groups)
 
     def scripts(self, src, cat):
-        def walk(el, path):
-            for c in el:
-                if c.tag == "Group":
-                    walk(c, f"{path} / {c.get('name')}" if path else c.get("name"))
-                elif c.tag == "Script":
-                    self.script(src, c, path)
-        walk(cat, "")
+        self.r.mark(cat)
+        self.walk_groups(cat, "", [], "Script", lambda sc, path, groups: self.script(src, sc, path, groups))
 
-    def script(self, src, sc, folder):
+    def script(self, src, sc, folder, groups):
         steps = sc.findall("StepList/Step")
+        self.r.mark(sc, sc.attrib)
         if sc.get("name") == "-" and not steps:
             self.counts["separators-skipped"] += 1
             return
+        if sc.find("StepList") is not None:
+            self.r.mark(sc.find("StepList"))
         body, disabled = [], 0
         for n, st in enumerate(steps, 1):
+            self.r.mark(st, st.attrib)
             on = st.get("enable", "True") == "True"
             disabled += not on
-            text = (st.findtext("StepText") or st.get("name") or "").strip()
+            raw = (st.findtext("StepText") or "").strip()
+            if st.find("StepText") is not None:
+                self.r.mark(st.find("StepText"), text=True)
+            if st.get("id") == "89" and st.find("Text") is not None:
+                self.r.mark(st.find("Text"), text=True)  # comment text; StepText holds it
+            text = raw or ("#" if st.get("id") == "89" else st.get("name") or "")
             # The target is a variable (<Name>$pw</Name>) or a field (<Field name=...>).
             secret = looks_like_secret_target(st.findtext("Name"),
                                               *[f.get("name") for f in st.findall("Field")])
-            text = redact_all_literals(text) if secret else redact_secrets(text)
-            first, *rest = text.splitlines() or [""]
+            text = redact(text, secret)
+            # StepText repeats the step's calculations, sometimes with less context (a plugin
+            # call shows as <Function Missing>): mask there what is masked in the calculation.
+            for c in st:
+                for calc in c.iter("Calculation"):
+                    ctext = calc.text or ""
+                    if looks_like_secret_target(c.tag):
+                        spans = value_literal_spans(ctext)
+                    else:
+                        spans = secret_spans(ctext)
+                    for a, b in spans:
+                        v = quoted(ctext, a, b)
+                        if len(v) > 2:
+                            text = text.replace(v, v.replace(v.strip('"'), REDACTION_PLACEHOLDER))
+            if not on and text.startswith("//"):
+                text = text[2:].lstrip()
+            first, *rest = lines_of(text)
             body.append(f"{n:>4} {'   ' if on else '// '}{first}")
             body += [f"{'':>4}    {ln}" for ln in rest]
             # Options StepText does not show (restored find requests, sort keys, import maps,
-            # file references, script/layout ids) and the refs of every calculation in the step.
+            # file references, script/layout ids), each calculation StepText leaves out or
+            # truncates, and the refs of every calculation in the step.
+            self.r.step_text = norm(raw)
             for c in st:
                 if c.tag == "StepText" or (st.get("id") == "89" and c.tag == "Text"):
                     continue
                 body += [f"{'':>8}{ln}" for ln in self.r.element(c, 0, secret, calc_text=False, parent=st)]
+            self.r.step_text = ""
+        options = " ".join(f"{k}={v}" for k, v in sc.attrib.items() if k not in ("id", "name"))
+        extra = [f"steps: {len(steps)} ({disabled} disabled)", f"options: {options}"]
+        if groups:
+            extra.append(f"folder group: {groups[-1]}")
         self.write(src, "scripts", sc.get("id"), sc.get("name"), folder,
-                   f"ScriptCatalog/Script[@id={sc.get('id')}]",
-                   [f"steps: {len(steps)} ({disabled} disabled)"], body)
+                   f"ScriptCatalog/Script[@id={sc.get('id')}]", extra, body)
 
     def layouts(self, src, cat):
-        def walk(el, path):
-            for c in el:
-                if c.tag == "Group":
-                    walk(c, f"{path} / {c.get('name')}" if path else c.get("name"))
-                elif c.tag == "Layout":
-                    if c.get("name") == "-" and c.find(".//Object") is None:
-                        self.counts["separators-skipped"] += 1
-                        continue
-                    objs = len(c.findall(".//Object"))
-                    self.write(src, "layouts", c.get("id"), c.get("name"), path,
-                               f"LayoutCatalog/Layout[@id={c.get('id')}]",
-                               [f"objects: {objs}"], self.r.element(c))
-        walk(cat, "")
+        self.r.mark(cat)
+
+        def one(c, path, groups):
+            self.r.mark(c, c.attrib)
+            if c.get("name") == "-" and c.find(".//Object") is None:
+                self.counts["separators-skipped"] += 1
+                return
+            extra = [f"objects: {len(c.findall('.//Object'))}"]
+            theme = c.find("Theme")
+            if theme is not None:
+                self.r.mark(theme)
+                extra.append(f"theme: {theme.get('name')}")
+            if groups:
+                extra.append(f"folder group: {groups[-1]}")
+            self.write(src, "layouts", c.get("id"), c.get("name"), path,
+                       f"LayoutCatalog/Layout[@id={c.get('id')}]", extra, self.r.element(c, defn=True))
+        self.walk_groups(cat, "", [], "Layout", one)
 
     def generic(self, src, cat, kind):
-        """Every child item of a catalog becomes one file. Folders (<Group>) are walked."""
+        """Every catalog item with an id becomes one file. Folders (<Group>) and id-less
+        wrappers of items (<Inbound>, <BaseDirectoryList>) are walked; the catalog's own
+        attributes and id-less settings go to <kind>/catalog-<Tag>.txt."""
+        self.r.mark(cat, cat.attrib)
+        rest = []
+
         def walk(el, path):
             for c in el:
                 if c.tag == "Group" and c.get("name") is not None and kind != "privilege-sets":
+                    self.r.mark(c, c.attrib)
                     walk(c, f"{path} / {c.get('name')}" if path else c.get("name"))
-                    continue
-                oid = c.get("id") or str(sum(1 for _ in el.iter()))
-                name = c.get("name") or c.findtext("Name") or c.tag
-                secret = kind == "custom-functions" and _secret_function(c)
-                self.write(src, kind, oid, name, path, f"{cat.tag}/{c.tag}[@id={c.get('id')}]", [],
-                           self.r.element(c, 0, secret))
+                elif c.get("id") is None and any(g.get("id") is not None for g in c):
+                    self.r.mark(c, c.attrib)
+                    walk(c, f"{path} / {c.tag}" if path else c.tag)
+                elif c.get("id") is None:
+                    rest.append(c)
+                else:
+                    name = c.get("name") or c.findtext("Name") or c.tag
+                    secret = "all" if kind == "custom-functions" and _secret_function(c) else False
+                    self.write(src, kind, c.get("id"), name, path, f"{cat.tag}/{c.tag}[@id={c.get('id')}]",
+                               [], self.r.element(c, 0, secret, defn=True))
         walk(cat, "")
+        if cat.attrib or rest:
+            body = [" ".join(f"{k}={_q(v)}" for k, v in cat.attrib.items())] if cat.attrib else []
+            for c in rest:
+                body += self.r.element(c, 0, defn=True)
+            self.write(src, kind, "catalog", cat.tag, "", cat.tag, [], body)
 
-    def explode_file(self, path):
-        root = parse_xml(path).getroot()
-        for file_el in root.iter("File"):
-            src = file_el.get("name")
+    # ── driver ───────────────────────────────────────────────────────────────
+
+    def load(self, paths):
+        """Parse every DDR of the set, so cross-file references resolve both ways."""
+        files = []
+        for p in paths:
+            root = parse_xml(p).getroot()
+            for file_el in root.iter("File"):
+                cat = Catalog(file_el)
+                self.catalogs[cat.stem] = cat
+                files.append((root, cat))
+                self.collect_secrets(file_el)
+        return files
+
+    def collect_secrets(self, file_el):
+        """Every credential value in the raw XML; the write gate checks no file holds one."""
+        def add(text, everything=False):
+            # From a credential context, a literal that is the whole value or has a key's
+            # shape ("Bearer " & $key is not a secret; "hunter22" alone is).
+            text = (text or "").strip()
+            if everything:
+                vals = [f'"{text[a:b]}"' for a, b in value_literal_spans(text)
+                        if (a == 1 and b == len(text) - 1) or looks_like_token(text[a:b])]
+            else:
+                vals = [quoted(text, a, b) for a, b in secret_spans(text, strong=True)]
+            self.secrets.update(v for v in vals if len(v.strip('"')) >= 6 and REDACTION_PLACEHOLDER not in v)
+        for el in file_el.iter():
+            if el.tag in USER_TAGS:
+                continue  # a user name also appears in logic (Get ( AccountName ) = "x")
+            if looks_like_secret_target(el.tag):
+                for c in el.iter("Calculation"):
+                    add(c.text, everything=True)
+            elif el.tag in ("Calculation", "StepText"):
+                add(el.text)
+        for st in file_el.iter("Step"):
+            if looks_like_secret_target(st.findtext("Name"), *[f.get("name") for f in st.findall("Field")]):
+                for c in st.iter("Calculation"):
+                    add(c.text, everything=True)
+        for cf in file_el.iterfind("CustomFunctionCatalog//CustomFunction"):
+            if _secret_function(cf):
+                for c in cf.iter("Calculation"):
+                    add(c.text, everything=True)
+
+    def explode(self, paths):
+        """Yield (file, raw calculations, shown calculations, uncovered classes) per <File>."""
+        for root, cat in self.load(paths):
+            file_el, src = cat.el, cat.name
+            self.r.cat = cat
+            self.r.parent = {c: p for p in root.iter() for c in p}
+            self.r.seen, self.r.reached = set(), set()
+            self.r.mark(file_el, file_el.attrib)
             raw_calcs = sum(1 for _ in file_el.iter("Calculation"))
-            skipped = sum(1 for s in SKIP - {"DisplayCalculation"}
-                          for el in file_el.iter(s) for _ in el.iter("Calculation"))
-            self.r.seen = set()  # element ids are reused once a file's tree is freed
-            for cat in file_el:
-                tag = cat.tag
+            unread = sum(1 for el in file_el.iter("ThemeCatalog") for _ in el.iter("Calculation"))
+            for c in file_el:
+                tag = c.tag
                 kind = CATALOG_KIND.get(tag, slug(tag).lower())
                 if tag == "BaseTableCatalog":
-                    self.tables(src, cat)
+                    self.tables(src, c)
                 elif tag == "RelationshipGraph":
-                    self.occurrences(src, cat)
+                    self.occurrences(src, c)
                 elif tag == "ScriptCatalog":
-                    self.scripts(src, cat)
+                    self.scripts(src, c)
                 elif tag == "LayoutCatalog":
-                    self.layouts(src, cat)
+                    self.layouts(src, c)
                 elif tag == "Options":
-                    self.write(src, "file", "0", "options", "", "Options", [], self.r.element(cat))
+                    extra = [f"host: {file_el.get('path')}",
+                             f"ddr: FileMaker {root.get('version')} {root.get('creationDate')}"]
+                    self.write(src, "file", "0", "options", "", "Options", extra,
+                               self.r.element(c, defn=True))
                 elif tag == "ThemeCatalog":
                     continue
                 else:
-                    self.generic(src, cat, kind)
-            emitted = self.r.calcs
-            yield src, raw_calcs - skipped, emitted
+                    self.generic(src, c, kind)
+            yield src, raw_calcs - unread, self.r.calcs, self.uncovered(file_el)
+            self.r.parent = {}
+
+    def uncovered(self, file_el):
+        """Raw classes that reached no object file and are not presentation."""
+        raw, stack = set(), [file_el]
+        while stack:
+            el = stack.pop()
+            if el.tag in UNREAD:
+                continue
+            k = self.r.key(el)
+            raw.add(k)
+            raw.update(f"{k}@{a}" for a in el.attrib)
+            if (el.text or "").strip():
+                raw.add(f"{k}#text")
+            stack.extend(el)
+        return sorted(k for k in raw - self.r.reached
+                      if not any(fnmatch.fnmatchcase(k, p) for p in PRESENTATION))
 
     def write_index(self):
         with open(os.path.join(self.out, "index.tsv"), "w", encoding="utf-8") as fh:
             fh.write("file\tkind\tid\tname\tfolder\tpath\tsha256\tlines\n")
             for row in sorted(self.rows, key=lambda r: (r[0], r[1], _num(r[2]))):
-                fh.write("\t".join(str(v).replace("\t", " ") for v in row) + "\n")
+                fh.write("\t".join(one_line(str(v)).replace("\t", " ") for v in row) + "\n")
+        with open(os.path.join(self.out, "unresolved.tsv"), "w", encoding="utf-8") as fh:
+            fh.write("path\ttag\tid\tname\tstatus\n")
+            for row in self.unresolved:
+                fh.write("\t".join(one_line(str(v)).replace("\t", " ") for v in row) + "\n")
+        self.write_legend()
+
+    def write_legend(self):
+        statuses = Counter(r[-1] for r in self.unresolved)
+        out = [
+            "# Legend",
+            "",
+            "Markers and codes used in these object files. Generated by explode_ddr.py.",
+            "",
+            "## Conventions",
+            "",
+            "- An option that is not printed has its default value: False for a field option,",
+            "  0 for `flags` and `rotation`.",
+            "- `(inactive)` marks a setting the DDR keeps while its option is off, for example an",
+            "  auto-enter calculation with `calculation=False`. FileMaker does not run it.",
+            "- `refs:` lists the fields (`TO::field#id`), custom functions (`cf:`) and functions",
+            "  (`fn:`) a calculation uses.",
+            "- In a script, a step option shows only its `refs:` line when the step text already",
+            "  shows the calculation; otherwise the full calculation is printed under the option.",
+            "- `¶` in a single-line value is a line break in the raw value.",
+            "- `<REDACTED>` replaces a credential value. The structure around it is kept.",
+            "- `<Field Missing>`, `<Table Missing>`, `<Function Missing>`, `<unknown>` are",
+            "  FileMaker's own markers in the DDR for a deleted target.",
+            "- `Field: TO::name#id rep=r/max` on a layout field gives the field id from DDRInfo.",
+            "  `rep` is printed only for a repeating field.",
+            "- `Display:` on a layout field or merge text gives a number, date or time format",
+            "  that is not the default (number flags 0 or 2304, date format 0, time flags 0 or 143).",
+            "- `PlatformData` (print setup) is binary and is not shown.",
+            "- AutoEnter `Serial`: the DDR does not say if serial numbering is on.",
+            "- The DDR has no layout parts (header, body, footer) and no layout view type.",
+            "",
+            "## References",
+            "",
+            "A reference to an id that does not resolve has a `ref=` marker, and a row in",
+            "`unresolved.tsv`:",
+            "",
+            "- `ref=none`: the id is 0 (nothing selected, or chosen by calculation at run time).",
+            "- `ref=missing`: the id is not in the target catalog (deleted in the source).",
+            "- `ref=separator`: the id is a `-` separator, which has no object file.",
+            "- `ref=external`: the target file is not in this DDR set.",
+            "- `in=<file>`: the target is in another file of the set.",
+            "- A table occurrence header and each relationship side give `base=` the path of",
+            "  the base table file, in whichever file of the set holds it.",
+            "",
+            "Counts in this run: " + (", ".join(f"{k} {v}" for k, v in sorted(statuses.items())) or "none"),
+            "",
+            "## Relationship options",
+            "",
+            "- `cascadeCreate=True` on a side: records can be created in that side's table",
+            "  through this relationship.",
+            "- `cascadeDelete=True` on a side: records in that side's table are deleted when",
+            "  the related record on the other side is deleted.",
+            "",
+            "## Codes",
+            "",
+            "Decoded codes are printed as `value(meaning)`. The meanings come from the values",
+            "observed in real DDRs (for example displayType 6 is only on date fields). Values",
+            "with no known meaning are printed raw and marked `unknown` below.",
+            "",
+        ]
+        for tag, attr in sorted(CODE_SET):
+            seen = self.r.codes.get((tag, attr))
+            if not seen:
+                continue
+            table = DECODE.get((tag, attr))
+            bits = BITS.get((tag, attr))
+            out.append(f"### {tag}@{attr}")
+            out.append("")
+            ranked = sorted(seen.items(), key=lambda kv: (-kv[1], kv[0] or ""))
+            for v, n in ranked[:LEGEND_VALUES]:
+                if table:
+                    meaning = table.get(v, "unknown")
+                elif bits and (v or "").isdigit():
+                    names = [nm for b, nm in bits.items() if int(v) & b]
+                    meaning = "+".join(names) or "none"
+                    if int(v) & ~sum(bits):
+                        meaning += " +unknown bits"
+                else:
+                    meaning = "unknown"
+                out.append(f"- `{v}`: {meaning} ({n})")
+            if len(ranked) > LEGEND_VALUES:
+                rest = ranked[LEGEND_VALUES:]
+                out.append(f"- {len(rest)} more values, {sum(n for _, n in rest)} uses")
+            out.append("")
+        with open(os.path.join(self.out, "LEGEND.md"), "w", encoding="utf-8") as fh:
+            fh.write("\n".join(out))
+
+
+def _char(code):
+    """A separator stored as a character code: 44 -> ','; 0 or absent -> ''."""
+    return chr(int(code)) if code and code.isdigit() and code != "0" else ""
+
+
+def quoted(text, a, b):
+    """The value at text[a:b], with its quotes when it is a whole literal."""
+    if a > 0 and b < len(text) and text[a - 1] == '"' and text[b] == '"':
+        return text[a - 1:b + 1]
+    return text[a:b]
+
+
+def redact(text, secret):
+    """secret="all": every literal; True: every value literal; False: credential shapes only."""
+    if secret == "all":
+        return redact_all_literals(text)
+    return redact_value_literals(text) if secret else redact_secrets(text)
 
 
 def _num(v):
@@ -365,17 +1029,31 @@ def main():
         sys.exit(f"Error: no DDR report XML in {raw}")
     ex = Exploder(out)
     failed = False
-    for f in files:
-        print(f"Exploding {os.path.basename(f)} ...")
-        for src, raw_calcs, emitted in ex.explode_file(f):
-            print(f"  {src}: {raw_calcs} calculations in raw XML, {emitted} rendered")
-            if emitted < raw_calcs:
-                print(f"  ERROR: {raw_calcs - emitted} calculation(s) were not rendered", file=sys.stderr)
-                failed = True
+    print(f"Exploding {len(files)} DDR file(s) ...")
+    for src, raw_calcs, shown, uncovered in ex.explode(files):
+        print(f"  {src}: {raw_calcs} calculations in raw XML, {shown} shown")
+        if shown < raw_calcs:
+            print(f"  ERROR: {raw_calcs - shown} calculation(s) were not shown", file=sys.stderr)
+            failed = True
+        if uncovered:
+            print(f"  ERROR: {len(uncovered)} raw class(es) reached no object file:", file=sys.stderr)
+            for k in uncovered:
+                print(f"    {k}", file=sys.stderr)
+            failed = True
     ex.write_index()
+    for rel, what in ex.leaks:
+        print(f"  ERROR: a credential ({what}) survived in {rel}", file=sys.stderr)
+        failed = True
+    for rel in ex.bad_lines:
+        print(f"  ERROR: a raw line break survived in {rel}", file=sys.stderr)
+        failed = True
     for kind, n in sorted(ex.counts.items()):
         print(f"  {kind}: {n}")
-    print(f"Wrote {len(ex.rows)} object files and index.tsv to {out}")
+    print(f"  credential values redacted: {parse_ddr._redaction_count}")
+    statuses = Counter(r[-1] for r in ex.unresolved)
+    print(f"  unresolved references: {len(ex.unresolved)} "
+          f"({', '.join(f'{k} {v}' for k, v in sorted(statuses.items())) or 'none'})")
+    print(f"Wrote {len(ex.rows)} object files, index.tsv, unresolved.tsv and LEGEND.md to {out}")
     sys.exit(1 if failed else 0)
 
 
