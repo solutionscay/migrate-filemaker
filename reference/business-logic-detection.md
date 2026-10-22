@@ -11,7 +11,8 @@ Use these signals to decide which objects need the closest reading. They are fea
 5. **Custom-function calls**: `grep -rl 'cf:<name>' "$OBJECTS"` finds the callers; read the function's object file and each caller. A custom function may be a generic utility; its existence alone is not a domain signal.
 6. **Authorization and routing decisions**: privilege-set checks, account/role state, record ownership predicates, field/layout access, and scripts that select a destination based on access.
 7. **External effects**: outbound HTTP/email/export/import, ODBC, filesystem/plugin activity, or calls to missing FileMaker files.
-8. **Developer evidence**: comment steps, field `Comment` lines, and comments inside calculations that describe exceptions, compliance, calculation intent, or return contracts.
+8. **Auto-enter that overwrites**: an auto-enter calculation with `overwriteExistingValue=True` that sets a status, flag or derived domain value on every change. It is a state rule even though no script runs it.
+9. **Developer evidence**: comment steps, field `Comment` lines, and comments inside calculations that describe exceptions, compliance, calculation intent, or return contracts.
 
 ## Name/folder hints
 

@@ -13,7 +13,7 @@ python3 "$SKILL_DIR/scripts/catalog_contract.py" snapshot --objects "$OBJECTS" \
 
 - `file` (one per FileMaker file): `OnOpen` options (minimum version, sign-in options), `WindowTriggers` (`OnFirstWindowOpen`, `OnLastWindowClose` and other file triggers with their scripts), `DefaultCustomMenuSet`, encryption.
 - `data-sources`: each `FileReference` (another FileMaker file, by `pathList`) or ODBC source. These are the links between files. Match a path to a file in the index by the rules in [../reference/ddr-xml-reference.md](../reference/ddr-xml-reference.md) ("Cross-file resolution", steps 1 to 3). A path that names no file in the index is an unresolved reference.
-- `auth-files`: which other files may open this one (`Outbound`/`Inbound` authorizations).
+- `auth-files`: which other files may open this one (`Outbound`/`Inbound` authorizations). The entries are file names, not data sources; match them to the index by file name, and mark a name with no file in the index as `unresolved` (a file outside this DDR set).
 - `base-directories`: where containers stored externally live.
 - Any other kind: read it as the same plain object tree.
 

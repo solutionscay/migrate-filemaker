@@ -32,6 +32,8 @@ Default deny. A target role may combine/decompose source privilege sets only as 
 
 ## Entity operation matrix
 
+Group entities by domain here; put the full table-by-role matrix in `08_auth_roles_appendix.md`. In a multi-file solution, take record rules from the file that holds the data, and say whether a rule on a parent table also limits its child tables.
+
 | Entity/domain | Role/capability | Create | View/query | Edit | Delete | Bulk/export/admin | Enforcement owner |
 |---|---|---|---|---|---|---|---|
 |  |  | deny/allow/conditional |  |  |  |  |  |
@@ -72,7 +74,7 @@ Route guards and hidden navigation supplement the underlying operation/row/field
 |---|---|---|---|---|---|
 |  |  |  |  |  |  |
 
-An absent/hidden control does not authorize or deny the operation by itself.
+An absent/hidden control does not authorize or deny the operation by itself. When a hide rule is the only control on sensitive data (a confidential field shown to one account or group), list it as an authorization gap with the policy that must replace it.
 
 ## Session and global state
 
@@ -81,6 +83,15 @@ An absent/hidden control does not authorize or deny the operation by itself.
 |  |  | per-session/per-request/durable preference/config | no unless independently proven |  |
 
 Hosted FileMaker globals default to per-client/session scope. Client/session claims must not become authoritative without server validation.
+
+## Privilege bypass and application-level permissions
+
+| Source | Evidence | What it bypasses or adds | Target policy |
+|---|---|---|---|
+| Scripts with `runFullAccess=True` | `objects/<file>/scripts/...` header | the caller's privilege set for that script's steps | |
+| Permission flags stored as data (for example booleans on a users table) | `objects/<file>/tables/...` | app checks on top of privilege sets | |
+| Commands removed by custom menus (for example Delete Record) | `objects/<file>/custom-menus/...` | an operation hidden for a menu set's users | |
+| File access authorization (`auth-files`) | `objects/<file>/auth-files/...` | which other files may open this one | |
 
 ## Service principals and integrations
 

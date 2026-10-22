@@ -20,12 +20,12 @@ python3 "$SKILL_DIR/scripts/catalog_contract.py" snapshot \
   --objects "$OBJECTS" --kind scripts --output "$CATALOG"
 ```
 
-Repeat `--kind` for an explorer that covers several kinds. A kind the solution does not have is noted and skipped. The catalog has one entry per index row:
+Repeat `--kind` for an explorer that covers several kinds. A kind the solution does not have is noted and skipped. The catalog is a JSON object: `objects` (the objects folder path), `kinds`, `batch_size`, `batch_lines`, `count`, and `entries`, one entry per index row:
 
 - `source_id`: the object file path relative to `objects/` (`<file>/<kind>/<id>-<name>.txt`).
 - `source_hash`: the row's `sha256`.
 - `file`, `kind`, `id`, `name`, `lines`: copied from the index.
-- `output_file`: the CSV for this row, relative to `CSV_ROOT`. It is one batch of up to 50 objects (`--batch-size`) from one file, kind and folder.
+- `output_file`: the CSV for this row, relative to `CSV_ROOT`. It is one batch of up to 50 objects (`--batch-size`) or 6000 object lines (`--batch-lines`) from one file, kind and folder. It starts with the kind, so CSVs land at `CSV_ROOT/<kind>/...`; that is intended.
 
 A batch is the unit of parallel work. Give each agent whole batches. Two agents never write the same CSV.
 
@@ -39,7 +39,7 @@ Every CSV starts with these columns, copied from the catalog entry:
 source_id,source_hash,kind,file,id,name,...explorer columns...
 ```
 
-Write CSVs with Python's `csv` module so quotes and newlines stay valid. A list cell (one line per field, rule or button) holds one item per line inside the quoted cell. Use the explorer's enums exactly. When the object file does not show something, write `unresolved` and put the question in `open_question`. Never fill a cell with a guess.
+Write CSVs with Python's `csv` module so quotes and newlines stay valid. A list cell (one line per field, rule or button) holds one item per line inside the quoted cell; write `none` when it has no items. Inside a line, `|` separates parts; put a name or label that contains `|` in double quotes. Use the explorer's enums exactly. When the object file does not show something, write `unresolved` and put the question in `open_question`. Never fill a cell with a guess.
 
 ## How to read an object
 

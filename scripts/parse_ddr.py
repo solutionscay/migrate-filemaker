@@ -192,6 +192,10 @@ def secret_spans(text, strong=False):
             for lit in re.finditer(r'"((?:[^"\\]|\\.)+)"', text[a:b]):
                 if not _ENUM_ARG_RE.fullmatch(lit.group(1)):
                     spans.append((a + lit.start(1), a + lit.end(1)))
+            # A licence key can be a bare number: MBS ( "Register" ; ... ; 202001 ; 123456789 ).
+            bare = re.fullmatch(r"\s*(-?\d{6,})\s*", text[a:b])
+            if bare:
+                spans.append((a + bare.start(1), a + bare.end(1)))
     return spans
 
 

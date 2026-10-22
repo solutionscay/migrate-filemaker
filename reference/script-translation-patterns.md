@@ -100,7 +100,7 @@ An example SQL transaction is not proof that a multi-script FileMaker sequence w
 - `server-query`: authorized reads, finds, reports, aggregates.
 - `background-job`: scheduled/long-running/retryable effects.
 - `external-adapter`: HTTP/email/file/ODBC/plugin boundary.
-- `client-presentation`: focus, display, local interaction with no trusted invariant.
+- `client-ui`: focus, display, local interaction with no trusted invariant.
 - `drop-candidate`: behavior made obsolete by the target, after dependencies are traced.
 - `unresolved`: insufficient context.
 

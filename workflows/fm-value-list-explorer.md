@@ -12,7 +12,7 @@ python3 "$SKILL_DIR/scripts/catalog_contract.py" snapshot \
 - `Source value=`: `Custom` (the values follow under `CustomValues`), `Field` (values come from `PrimaryField` and an optional `SecondaryField` for display), or `External` (a list in another file).
 - `ShowRelated` and its table occurrence: the list shows only related records.
 - Sort and show options on each field.
-- Where it is used: `grep -rlF '<name>' "$OBJECTS"`, then keep the hits that use the list (layout `ValueList:` lines, validation, script steps, `ValueListItems` calculations).
+- Where it is used: grep the markers, not the bare name: `ValueList: <name>#<id>` on layout fields, `ValueList id=<id> name=` in field validation and script steps, and `ValueListItems` calculations that quote the name.
 
 ## Record
 
@@ -21,7 +21,7 @@ source_id,source_hash,kind,file,id,name,source,values,stored_display,related_to,
 ```
 
 - `source`: `custom`, `field`, `external`.
-- `values`: for `custom`, the count and the values when they name a domain state (status, type); else the `TO::field#id` the values come from.
+- `values`: for `custom`, the count and the values when they name a domain state (status, type); else the `TO::field#id` the values come from. A list can keep settings of its inactive source (custom values on a field list, or the reverse); add `inactive: <what>` as a last line.
 - `stored_display`: the stored field and the displayed field when they differ, else `same`.
 - `related_to`: the table occurrence for a related-only list, else empty.
 - `used_by`: object file paths, one per line, or `none found`.

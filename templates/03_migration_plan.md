@@ -23,6 +23,8 @@ Define increments around usable, authorized workflows—not generic CRUD layers.
 
 Each increment must implement its server-side invariants and negative authorization tests before exposing the workflow.
 
+Say whether increments go live one at a time or only set build order. When modules share core tables (cases, people) and nothing writes back to FileMaker, a split go-live means two systems of record; state the choice and its D- id. A policy that spans increments is owned by the first increment that needs it and retested by the later ones.
+
 ## Foundation gates
 
 - [ ] Repository/runtime versions and CI quality gates are reproducible.
@@ -75,6 +77,8 @@ Keep outbound `Insert from URL` replacements separate from inbound webhook endpo
 - Load in dependency-aware stages while preserving compound/source identifiers.
 - Reconcile parallel writes or enforce an explicit freeze window.
 - Make reruns idempotent and record batch/version lineage.
+
+Load order: list foreign-key cycles and how the load breaks them (load without the constraint, then add it). Seed every number counter (serials, case or invoice numbers) from the source maximum at cutover.
 
 ### Validation matrix
 

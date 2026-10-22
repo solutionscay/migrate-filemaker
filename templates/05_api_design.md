@@ -1,6 +1,6 @@
 # Server Operation / API Design
 
-Use this artifact for the interface style selected in recommendations: server functions/actions, GraphQL, REST, events, or a combination. Do not create CRUD endpoints for every FileMaker base table.
+Choose the interface style here (server functions/actions, GraphQL, REST, events, or a combination) and record it as a product decision; `02_recommendations.md` is written later and confirms or changes it. Do not create CRUD endpoints for every FileMaker base table.
 
 ## Evidence and boundary
 
@@ -67,6 +67,19 @@ Default deny. Route/operation checks, row filters, field restrictions, and UI vi
 - FileMaker `Insert from URL` proves an outbound request, not an inbound webhook.
 - An inbound webhook requires separate provider/receiver evidence, signature verification, replay protection, and idempotency.
 - Do not copy credential literals from DDR scripts/calculations.
+- Client-side mail (`Send Mail` via the e-mail client) and embedded web viewers are integrations too. A web viewer URL that carries a key moves that key to the server.
+
+## Background jobs
+
+| Job id | Source (script, schedule, robot queue) | Trigger and frequency | Operation (OP- id) | Idempotency/retry | Run-as principal (08) | Evidence |
+|---|---|---|---|---|---|---|
+| JOB-01 |  |  |  |  |  | `objects/<file>/scripts/...` |
+
+The DDR has no server schedules. A script that names a schedule, runs as a server account, or reads a robot queue table is a job candidate; mark its frequency `unavailable` until discovery confirms it.
+
+## Confirmations
+
+A FileMaker "show dialog, then continue" step is a business rule when it guards a write. Model it as a two-step command (the server returns the warning; the client resends with a confirmation flag) and cite the 07 rule.
 
 ## Errors, concurrency, and observability
 

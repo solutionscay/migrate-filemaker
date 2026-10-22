@@ -15,6 +15,8 @@ Overall readiness: <!-- inventory-only / behavior-ready / implementation-ready -
 
 Do not claim implementation-ready while a required screen lacks labels/hierarchy/controls/actions/triggers/authorization/states.
 
+Give each target page a `UI-<nn>` id. Put the full layout inventory and per-object maps in `06_ui_spec_appendix.md`, generated from the layout catalog; this file keeps the main screens.
+
 ## Source screen inventory
 
 | Layout file | TO → base table | Purpose | Fields/portals/buttons | Hide/CF rules | Screenshot | Readiness | Disposition |
@@ -28,6 +30,8 @@ Do not claim implementation-ready while a required screen lacks labels/hierarchy
 |  |  |  |  |  |  |  |
 
 Identify each object by its layout file and `key`.
+
+Several layouts often show one record in different views (a detail screen per workflow stage). Map them to one target page with views, and list every source layout under it. Note navigation that a script builds from a computed layout name; the layout catalog cannot see it.
 
 ## Navigation and workflows
 
@@ -94,4 +98,4 @@ Keep each distinct `Format:` even when conditions match.
 - [ ] Every in-scope target page has an evidence readiness level.
 - [ ] Every hide rule, conditional format, trigger and button in the layout explorer has a target behavior.
 - [ ] Server authorization negative tests exist for hidden/restricted operations and fields.
-- [ ] Critical workflows were walked against the current app/screenshots/recordings.
+- [ ] Critical workflows were walked against the current app/screenshots/recordings, or this item is marked blocked with its D- id when none exist.

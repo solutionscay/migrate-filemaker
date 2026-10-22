@@ -54,19 +54,29 @@ Every row of `objects/index.tsv` is read in full and gets one CSV row. Each expl
 - Custom menus and menu sets: [workflows/fm-menu-explorer.md](workflows/fm-menu-explorer.md)
 - File options, data sources, and every other kind: [workflows/fm-file-explorer.md](workflows/fm-file-explorer.md)
 
-Large solutions have thousands of objects. The catalog splits each kind into batches of 50 (one CSV each). Give each agent whole batches and run them in parallel.
+Large solutions have thousands of objects and hundreds of thousands of lines. The catalog splits each kind into batches of at most 50 objects or 6000 lines (one CSV each). Give each agent whole batches and run them in parallel:
+
+```bash
+python3 "$SKILL_DIR/scripts/catalog_contract.py" assign --agents 20 --output "$OUT_DIR/explorers/assignments" \
+  --catalog "$OUT_DIR/explorers/layouts/catalog.json" --catalog ...
+```
+
+- `assign` packs whole batches into agents of near-equal lines; one TSV per agent. About 20,000 object lines is a fair share for one agent: on a 4,500-object solution that took 22 agents of 4 to 10 minutes each. Pack one explorer per agent where you can, so each agent reads one workflow.
+- Each agent proves its own share with `verify --catalog ... --csv-root ... --assignment <its tsv>` before it reports.
+- An agent may use a helper script to pre-fill mechanical columns (counts, callers, census lines). It still reads each object and writes the meaning, purpose and target columns itself.
+- Ask each agent to report skill problems it hit. Fix the workflow before the next run, not during one: a changed object file changes its hash and voids its row.
 
 ## Step 4: Discovery questions
 
 Write `01_discovery_answers.md` from [templates/01_discovery_answers.md](templates/01_discovery_answers.md). Ask only what the objects cannot tell: goals, scope, users, identity provider, data volume, integrations, and which behaviors to keep, change, or drop. With no one to answer, list the questions and continue.
 
-Start with the questions the catalogs raise. Collect every `open_question`, every `drop-candidate` and `unresolved` target, every `callers`, `used_by` or `installed_by` of `none found`, every graph `use` of `unused`, and every row of `objects/unresolved.tsv`. Rank them by what the answer changes in the plan. Do not cap the list; the owner answers from the top and can stop at any point.
+Start with the questions the catalogs raise. Collect every `open_question`, every `drop-candidate` and `unresolved` target, every `callers`, `used_by` or `installed_by` of `none found`, every graph `use` of `unused`, and every row of `objects/unresolved.tsv`. A large solution raises thousands of these signals. Group them into questions that one answer settles ("are the 284 layouts with no caller still used?"), and keep the full list as `01_discovery_signals.tsv`. Rank the questions by what the answer changes in the plan. Do not cap the list; the owner answers from the top and can stop at any point.
 
 Give every answer an ID (`D-01`, `D-02`, ...). When an answer is "I don't know", record the default you assume, who can decide, and which increment waits on it.
 
 ## Step 5: Write the migration plan
 
-Write each artifact from its template, citing object files as evidence. Cite an object file by its `path` from `objects/index.tsv`.
+Write each artifact from its template, citing object files as evidence. Cite an object file as `objects/<path>`, where `<path>` is its `path` in `objects/index.tsv`.
 
 | Artifact | Template | Reference |
 |---|---|---|
@@ -80,6 +90,14 @@ Write each artifact from its template, citing object files as evidence. Cite an 
 
 Write them in this order. Each one builds on the ones above it. `07` owns the business rules and `08` owns the authorization policies; the other artifacts cite their rule and policy ids and do not restate them. Where a decision rests on a discovery answer, cite its `D-` id.
 
+Some links point forward: `07` names the policy that guards each operation, and `04` and `05` make stack choices that `02` confirms. Write each artifact with the ids it can know, then make one reconcile pass after `03`: fill forward ids, and make every cited id, table and column exist in the artifact that owns it.
+
+Shared conventions, so artifacts written by different agents line up:
+
+- Target tables and columns: snake_case of the FileMaker name. Split at each lower-to-upper change and at each letter-digit change, and keep a run of capitals together (`FileMaker_AccountName` -> `file_maker_account_name`, `Invoice_Lines` -> `invoice_lines`, `SKU_Code` -> `sku_code`).
+- Ids: rules `BR-<DOMAIN>-<nn>` and operations `OP-<DOMAIN>-<nn>` (07), roles `ROLE-<NAME>` and policies `AP-<nn>` (08), screens `UI-<nn>` (06), background jobs `JOB-<nn>` and integrations `EXT-<nn>` (05), increments `I<n>` (03), open decisions `OD-<artifact>-<nn>`, tests `T-<artifact>-<nn>`. Pick the domain list once and give it to every writer.
+- A large inventory (every field, layout, script or table-by-role cell) goes in `<artifact>_appendix.md` (or `.csv`), generated from the catalogs. The template's tables then hold the important rows and point to the appendix.
+
 Without discovery answers or a chosen stack, write the artifacts anyway and mark each product decision open.
 
 For FileMaker behavior, see [reference/filemaker-concepts.md](reference/filemaker-concepts.md). For the DDR format, see [reference/ddr-xml-reference.md](reference/ddr-xml-reference.md).
@@ -88,7 +106,7 @@ For FileMaker behavior, see [reference/filemaker-concepts.md](reference/filemake
 
 Before you call the plan done, check that it rests on what the objects say, not on what the catalogs guessed.
 
-- Re-read the object file behind each tier1 rule in `07_business_logic.md`. Fix the plan where the rule is wrong.
+- Re-read the object file behind each tier1 rule in `07_business_logic.md`. Fix the plan where the rule is wrong, keep the rule's id, and mark the fix. Use a reader who did not write `07`: on a 1,200-script solution an author who had read every tier1 object still had 17% of rules wrong, and only a second reader caught them.
 - List what the plan still does not understand: unanswered questions, `unresolved` targets, and rows of `objects/unresolved.tsv`. Name the part of the plan each gap affects.
 
 Write the result to `09_audit.md`. The operator decides which gaps matter. A gap the operator accepts stays listed and does not block the plan.

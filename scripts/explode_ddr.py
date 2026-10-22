@@ -190,13 +190,25 @@ class Catalog:
 
     def _items(self, cat_tag, item_tag, content):
         ids, seps = set(), set()
-        cat = self.el.find(cat_tag)
-        if cat is not None:
-            for it in cat.iter(item_tag):
-                if it.get("name") == "-" and it.find(content) is None:
+
+        # Walk the catalog and its folders only. A <Script> inside a step is a call to
+        # a script, not a script; counting it hid every call to a deleted script.
+        def walk(node):
+            for it in node:
+                if it.tag != item_tag:
+                    if it.tag == "Group":
+                        ids.add(it.get("id"))  # privilege sets list folders by id too
+                    walk(it)
+                elif it.get("name") == "-" and it.find(content) is None:
                     seps.add(it.get("id"))
                 else:
                     ids.add(it.get("id"))
+                    if it.find(content) is None:
+                        walk(it)  # a folder (group) item holds more items
+
+        cat = self.el.find(cat_tag)
+        if cat is not None:
+            walk(cat)
         return ids, seps
 
     def table_path(self, table_id):
@@ -261,9 +273,8 @@ class Renderer:
         refs = self.refs(display) if display is not None else []
         raw = (el.text or "").rstrip()
         if not show_text and norm(raw) in self.step_text:
-            # The step line already shows this calculation; keep only what it cannot show:
-            # which field (by id), custom function or table occurrence it touches.
-            refs = [r for r in refs if not r.startswith("fn:")]
+            # The step line already shows this calculation; keep only its refs: which
+            # field (by id), custom function, function or table occurrence it touches.
             return [f"{pad}refs: {', '.join(refs)}"] if refs else []
         attrs = " ".join(f"{k}={_q(v)}" for k, v in el.attrib.items())
         flag = " (inactive)" if inactive else ""
@@ -301,6 +312,10 @@ class Renderer:
             return None if oid in tcat.fields.get(btid, ()) else "missing"
         if oid is None:
             return None
+        if oid == "-1" and name == "<Current Table>":
+            return None  # Truncate Table and similar steps on the current table
+        if tag == "CustomMenuSet" and oid == "0" and not name:
+            return None  # a layout's "[File Default]" menu set, not a broken reference
         if tag == "Script":
             ids, seps = cat.scripts, cat.script_seps
         elif tag == "Layout":
@@ -317,6 +332,8 @@ class Renderer:
             return "none"
         if oid in seps:
             return "separator"
+        if tag in ("Script", "Layout") and name == "--" and parent is not None and parent.tag != "Step":
+            return None  # a privilege set's end-of-folder marker, not an object
         return None if oid in ids else "missing"
 
     def side_attrs(self, to_name):
@@ -649,6 +666,10 @@ class Exploder:
             for f in fields:
                 secret = looks_like_secret_target(f.get("name"))
                 body += self.r.element(f, 0, secret, defn=True)
+                ae = f.find("AutoEnter")
+                if (f.get("fieldType") == "Calculated" and f.find("Calculation") is None) or \
+                        (ae is not None and ae.get("calculation") == "True" and ae.find("Calculation") is None):
+                    body.append("  (no formula in DDR)")
                 body.append("")
             self.write(src, "tables", t.get("id"), t.get("name"), "",
                        f"BaseTableCatalog/BaseTable[@id={t.get('id')}]", extra, body)
@@ -932,6 +953,30 @@ class Exploder:
             "- `PlatformData` (print setup) is binary and is not shown.",
             "- AutoEnter `Serial`: the DDR does not say if serial numbering is on.",
             "- The DDR has no layout parts (header, body, footer) and no layout view type.",
+            "- `(no formula in DDR)` on a field: the field is calculated, or has an auto-enter",
+            "  calculation switched on, but the DDR has no formula text for it.",
+            "- `<Function Missing>` in a calculation is also a plugin function (for example",
+            "  `MBS`, `FTPeek`) whose plugin was not installed when the DDR was made.",
+            "- A `cf:` ref can be a custom-function parameter with the same name as a custom",
+            "  function: the DDR types it as a function reference. Check the function's parameters.",
+            "- In a script, a step's text can run over several lines; the continuation lines have",
+            "  the same indent as the option lines under the step.",
+            "- Script step options name fields as `Field table=<TO> id=<n> repetition=<r> name=<f>`.",
+            "  `Field table=\"\" id=0 ref=none` is an empty slot (for example an unused dialog input).",
+            "- A trigger's or button's parameter sits under its `Script` line.",
+            "- A disabled script step prints as `<n> // <step>`; a live step as `<n>    <step>`.",
+            "- A find, sort or import step with `Restore state=False` still shows its saved",
+            "  request, sort order or map; FileMaker does not use it when the step runs.",
+            "- On a layout, a step's text may print as a bare `StepText` line followed by `|` lines.",
+            "- `CustomMenuSet id=0 name=\"\"` on a layout is FileMaker's `[File Default]`: the",
+            "  layout uses the menu set named in the file options.",
+            "- `Import Records` shows its target table occurrence and field map. The DDR often does",
+            "  not include the import source file or path.",
+            "- A table occurrence whose data source has `ref=missing` shows `base table: external`:",
+            "  its file is not in this DDR set and its data source entry is gone.",
+            "- A privilege set's `[Any New Layout]`, `[Any New Table]`, `[Any New Field]` entries set",
+            "  the access for objects added later. `FieldAccess value=Limited` with no field list",
+            "  restricts no field beyond the table rule.",
             "",
             "## References",
             "",

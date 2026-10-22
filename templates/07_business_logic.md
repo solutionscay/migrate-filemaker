@@ -20,9 +20,11 @@ Every source identity (an object file, or a field or layout rule inside it) must
 
 ## Domain invariants and operations
 
-| Domain/rule id | Plain-language invariant | Preconditions/inputs | Reads | Writes/found-set scope | Error/exception behavior | Object files | Open question |
-|---|---|---|---|---|---|---|---|
-|  |  |  |  |  |  |  |  |
+| Domain/rule id | Plain-language invariant | Started by | Preconditions/inputs | Reads | Writes/found-set scope | Error/exception behavior | Object files | Open question |
+|---|---|---|---|---|---|---|---|---|
+|  |  | button / field trigger / layout trigger / menu / file open / schedule / other script |  |  |  |  |  |  |
+
+Split this table by domain when it runs past a few dozen rows. An auto-enter calculation that sets a status or other domain value on every change is a rule; list it here, not only under calculations.
 
 ## Target ownership
 
@@ -81,5 +83,5 @@ Never translate `Replace Field Contents` to an unqualified update. `Insert from 
 - [ ] `catalog_contract.py verify` passes for every explorer.
 - [ ] Every logic-bearing catalog row has a disposition.
 - [ ] Every tier1 rule cites its object file and step number or field id.
-- [ ] Found-set, null/empty, boundary, unauthorized, error, and retry fixtures exist where applicable.
+- [ ] Every tier1 rule names its semantic tests (found-set, null/empty, boundary, unauthorized, error, retry, as they apply). Building the fixtures belongs to the implementation, not to this plan.
 - [ ] No credential literal appears in this document.

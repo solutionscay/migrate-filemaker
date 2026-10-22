@@ -12,9 +12,11 @@
 | Deployment/operations/compliance |  |  |  |  |
 | Reversal/migration cost |  |  |  |  |
 
-Record product preferences separately from repository facts and current external evidence.
+Record product preferences separately from repository facts and current external evidence. Without stakeholder weights, leave the weights blank, say so, and rank by hard gates only.
 
 ## Recommendation
+
+`04` (database dialect) and `05` (interface style) are written before this file. Confirm or change their choices here, and cite their decision ids.
 
 | Layer | Primary | Alternative | Evidence-based rationale / tradeoff |
 |---|---|---|---|
@@ -26,12 +28,17 @@ Record product preferences separately from repository facts and current external
 | Background jobs/events |  |  |  |
 | File/container storage |  |  |  |
 | Authentication/identity provider |  |  |  |
+| Hosting/compliance (for example sector security policy, data residency) |  |  |  |
+| Document/PDF generation (print layouts, letters) |  |  |  |
+| Integrations and secrets |  |  |  |
 | Authorization enforcement |  |  |  |
 | Testing/observability/deployment |  |  |  |
 
 Do not claim built-in authentication implements FileMaker authorization. Explain operation, row, field, route/layout, script/value-list, access-channel, service-principal, and UI enforcement separately.
 
 ## Existing-stack decision
+
+Skip this section, and the "Existing repository compatibility" row, when no target repository exists yet; say so in one line.
 
 - Established stack: <!-- measured from repo -->
 - Keep/change decision: <!-- explicit -->
@@ -50,6 +57,7 @@ This table picks the mechanism for each layer. The policies themselves live in `
 | Operations/scripts/value lists |  |  |  |
 | Routes/layouts |  |  |  |
 | Extended privileges/access channels |  |  |  |
+| Service principals (robots, server schedules, API clients) |  |  |  |
 | UI visibility |  |  | Secondary only |
 
 ## Interface style

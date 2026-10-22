@@ -23,7 +23,7 @@ source_id,source_hash,kind,file,id,name,install_when,items,removed,overrides,ope
 
 - `install_when`: the meaning of the menu's install condition, or `always`.
 - `items`: the number of menu items.
-- `removed`: standard commands this menu leaves out or installs only on a condition, one per line with the condition. A removed `Delete Record` is behavior the target must decide on.
+- `removed`: standard commands this menu leaves out or installs only on a condition, one per line with the condition. A removed `Delete Record` is behavior the target must decide on. The DDR lists only the items a menu keeps, not the standard menu it replaces. Name a removed command only when the menu's `BaseMenu` is a standard menu whose items you can list (Records: New, Duplicate, Delete Record, Delete Found/All, Replace Field Contents); else write `unresolved` and ask.
 - `overrides`: one line per item whose action is replaced: `<command> | <script id or step> | <what it does>`.
 
 Menu sets:

@@ -9,17 +9,22 @@
 --   timezone/DST decision: <decision id>
 --   unresolved blockers: <none or list>
 --
--- This file must remain non-executable while a key target, relationship side,
--- validation change, or required source field is unresolved. Do not invent an
+-- Tables, columns and keys the objects prove are executable. A constraint that
+-- rests on an unresolved key, relationship side, validation change or source
+-- field stays commented out, with the decision id it waits on. Do not invent an
 -- `id SERIAL PRIMARY KEY`, foreign key to `parent(id)`, or unconditional SQL
 -- constraint merely to make the DDL complete.
+--
+-- Multi-tenant default (when discovery keeps one): a `tenant_id` column on every
+-- entity table, part of each unique constraint, cited to its D- id.
 
 BEGIN;
 
 -- ---------------------------------------------------------------------------
 -- Source-to-target mapping register
 -- ---------------------------------------------------------------------------
--- Maintain the full register in the companion schema decision artifact.
+-- Keep the full register in `04_database_schema_appendix.md`: one row per base
+-- table, field, relationship and value list, generated from the catalogs.
 -- Every target object below cites its object file and field id, or an
 -- approved product-decision id.
 --
@@ -28,6 +33,9 @@ BEGIN;
 
 -- ---------------------------------------------------------------------------
 -- Domains/reference values (only when value-list semantics and governance prove it)
+-- Many small custom lists may share one `value_list_items (list, value, sort)`
+-- table instead of one table or enum each. A multikey field (a return-separated
+-- list of keys) becomes a join table.
 -- ---------------------------------------------------------------------------
 
 -- Example shape; replace/remove based on evidence:
@@ -80,7 +88,8 @@ BEGIN;
 --   ON DELETE <decision>;
 --
 -- Record NotEqual/GreaterThan/LessThan/CartesianProduct relationships in the
--- companion query/domain-rule register; do not force them into FKs.
+-- appendix's relationship register (they become queries or 07 rules); do not
+-- force them into FKs.
 
 -- ---------------------------------------------------------------------------
 -- Indexes
