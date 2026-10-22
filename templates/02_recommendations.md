@@ -40,6 +40,8 @@ Do not claim built-in authentication implements FileMaker authorization. Explain
 
 ## Authorization architecture
 
+This table picks the mechanism for each layer. The policies themselves live in `08_auth_roles.md`.
+
 | Source dimension | Target owner/mechanism | Default deny | Negative-test strategy |
 |---|---|---|---|
 | Roles/capabilities |  |  |  |
@@ -56,11 +58,7 @@ State why the selected system uses server actions/functions, GraphQL, REST, even
 
 ## Migration strategy
 
-| Increment | User/business outcome | Source scope | Dependencies | Exit evidence | Rollback boundary |
-|---|---|---|---|---|---|
-|  |  |  |  |  |  |
-
-Do not defer authorization or core invariants until after generic data entry is exposed.
+State the strategy in a few sentences: big bang, by workflow, or by office, and why. `03_migration_plan.md` owns the increments. Do not defer authorization or core invariants until after generic data entry is exposed.
 
 ## Current external evidence
 

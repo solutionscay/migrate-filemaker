@@ -50,9 +50,11 @@ The DDR contains no password or password hash. Include a local password-change o
 
 ## Authorization matrix
 
-| Operation/query | Role/capability | Record predicate | Field read/write projection | Access channel | Deny behavior/test |
-|---|---|---|---|---|---|
-|  |  |  |  |  |  |
+| Operation/query | Policy ids (`08`) | Access channel | Deny behavior |
+|---|---|---|---|
+|  |  |  |  |
+
+`08_auth_roles.md` defines each role, record predicate and field rule. Cite its policy ids here.
 
 Default deny. Route/operation checks, row filters, field restrictions, and UI visibility are separate layers.
 

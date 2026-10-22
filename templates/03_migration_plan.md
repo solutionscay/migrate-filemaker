@@ -32,26 +32,13 @@ Each increment must implement its server-side invariants and negative authorizat
 - [ ] Backup, restore, observability, secret management, and environment promotion are tested.
 - [ ] Source-to-target traceability identifiers are retained.
 
-## Business-logic implementation
+## Rules and policies by increment
 
-| Rule/operation | Object files | Preconditions | Reads/writes/scope | Target owner | Failure behavior | Semantic fixtures |
-|---|---|---|---|---|---|---|
-|  |  |  |  |  |  |  |
+| Increment | Business rule ids (`07`) | Authorization policy ids (`08`) | Discovery answers (`D-`) |
+|---|---|---|---|
+|  |  |  |  |
 
-Cover scripts, calculated fields, custom functions, validation/auto-enter, value lists, layout rules, custom menus, file triggers, and security predicates. Trigger invocation does not make persistent logic client-owned.
-
-## Authorization implementation
-
-| Dimension | Source rules | Enforcement owner | Tests | Status |
-|---|---|---|---|---|
-| Account provisioning/disabled/service identities |  |  |  |  |
-| Role/capability |  |  |  |  |
-| Create/view/edit/delete by entity |  |  |  |  |
-| Record predicates |  |  |  |  |
-| Field read/write |  |  |  |  |
-| Operations/scripts/value lists |  |  |  |  |
-| Routes/layouts/access channels |  |  |  |  |
-| UI visibility/exceptions |  | Secondary |  |  |
+`07_business_logic.md` defines each rule and `08_auth_roles.md` defines each policy. Cite their ids here; do not restate them. Every tier1 rule and every policy lands in exactly one increment.
 
 ## UI implementation
 

@@ -60,26 +60,42 @@ Large solutions have thousands of objects. The catalog splits each kind into bat
 
 Write `01_discovery_answers.md` from [templates/01_discovery_answers.md](templates/01_discovery_answers.md). Ask only what the objects cannot tell: goals, scope, users, identity provider, data volume, integrations, and which behaviors to keep, change, or drop. With no one to answer, list the questions and continue.
 
+Start with the questions the catalogs raise. Collect every `open_question`, every `drop-candidate` and `unresolved` target, every `callers`, `used_by` or `installed_by` of `none found`, every graph `use` of `unused`, and every row of `objects/unresolved.tsv`. Rank them by what the answer changes in the plan. Do not cap the list; the owner answers from the top and can stop at any point.
+
+Give every answer an ID (`D-01`, `D-02`, ...). When an answer is "I don't know", record the default you assume, who can decide, and which increment waits on it.
+
 ## Step 5: Write the migration plan
 
-Write each artifact from its template, citing object files as evidence:
+Write each artifact from its template, citing object files as evidence. Cite an object file by its `path` from `objects/index.tsv`.
 
 | Artifact | Template | Reference |
 |---|---|---|
-| `02_recommendations.md` | [templates/02_recommendations.md](templates/02_recommendations.md) | [reference/tech-stack-decision-matrix.md](reference/tech-stack-decision-matrix.md) |
-| `03_migration_plan.md` | [templates/03_migration_plan.md](templates/03_migration_plan.md) | |
 | `04_database_schema.sql` | [templates/04_database_schema.sql](templates/04_database_schema.sql) | [reference/schema-translation-guide.md](reference/schema-translation-guide.md) |
-| `05_api_design.md` | [templates/05_api_design.md](templates/05_api_design.md) | |
-| `06_ui_spec.md` | [templates/06_ui_spec.md](templates/06_ui_spec.md) | |
 | `07_business_logic.md` | [templates/07_business_logic.md](templates/07_business_logic.md) | [reference/script-translation-patterns.md](reference/script-translation-patterns.md), [reference/business-logic-detection.md](reference/business-logic-detection.md) |
 | `08_auth_roles.md` | [templates/08_auth_roles.md](templates/08_auth_roles.md) | |
+| `05_api_design.md` | [templates/05_api_design.md](templates/05_api_design.md) | |
+| `06_ui_spec.md` | [templates/06_ui_spec.md](templates/06_ui_spec.md) | |
+| `02_recommendations.md` | [templates/02_recommendations.md](templates/02_recommendations.md) | [reference/tech-stack-decision-matrix.md](reference/tech-stack-decision-matrix.md) |
+| `03_migration_plan.md` | [templates/03_migration_plan.md](templates/03_migration_plan.md) | |
+
+Write them in this order. Each one builds on the ones above it. `07` owns the business rules and `08` owns the authorization policies; the other artifacts cite their rule and policy ids and do not restate them. Where a decision rests on a discovery answer, cite its `D-` id.
 
 Without discovery answers or a chosen stack, write the artifacts anyway and mark each product decision open.
 
 For FileMaker behavior, see [reference/filemaker-concepts.md](reference/filemaker-concepts.md). For the DDR format, see [reference/ddr-xml-reference.md](reference/ddr-xml-reference.md).
 
+## Step 6: Audit the plan against the objects
+
+Before you call the plan done, check that it rests on what the objects say, not on what the catalogs guessed.
+
+- Re-read the object file behind each tier1 rule in `07_business_logic.md`. Fix the plan where the rule is wrong.
+- List what the plan still does not understand: unanswered questions, `unresolved` targets, and rows of `objects/unresolved.tsv`. Name the part of the plan each gap affects.
+
+Write the result to `09_audit.md`. The operator decides which gaps matter. A gap the operator accepts stays listed and does not block the plan.
+
 ## Done when
 
 - Every kind in `objects/index.tsv` is in one explorer's catalog, and `catalog_contract.py verify` passes for every explorer.
 - Every artifact in Step 5 exists, cites object files, and lists its open decisions.
+- `09_audit.md` lists every gap and the part of the plan it affects.
 - No artifact contains a credential.
