@@ -4,6 +4,7 @@ import csv
 import importlib.util
 import io
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -160,169 +161,123 @@ class ProvenanceTests(unittest.TestCase):
 
 
 class CatalogContractTests(unittest.TestCase):
-    def snapshot(self, root, scripts):
-        spec = root / "05_scripts.json"
-        output = root / "source_catalog.json"
-        spec.write_text(json.dumps(scripts), encoding="utf-8")
-        catalog_contract.snapshot(
-            argparse.Namespace(kind="scripts", spec=spec, output=output, force=False)
-        )
-        return output
+    ROWS = [
+        ("A.fmp12", "scripts", "1", "Open", "", "A.fmp12/scripts/1-Open.txt"),
+        ("A.fmp12", "scripts", "2", "Log", "Utilities", "A.fmp12/scripts/2-Log.txt"),
+        ("A.fmp12", "scripts", "3", "Route", "Utilities", "A.fmp12/scripts/3-Route.txt"),
+        ("B.fmp12", "scripts", "2", "Log", "Utilities", "B.fmp12/scripts/2-Log.txt"),
+        ("A.fmp12", "tables", "1", "People", "", "A.fmp12/tables/1-People.txt"),
+        # The DDR gives some items no id; explode_ddr.py can then repeat one.
+        ("A.fmp12", "base-directories", "5", "Options", "", "A.fmp12/base-directories/5-Options.txt"),
+        ("A.fmp12", "base-directories", "5", "List", "", "A.fmp12/base-directories/5-List.txt"),
+    ]
 
-    def write_csvs(self, root, catalog):
-        csv_root = root / "catalogs"
-        csv_root.mkdir()
+    def write_index(self, objects, rows):
+        objects.mkdir(exist_ok=True)
+        lines = ["file\tkind\tid\tname\tfolder\tpath\tsha256\tlines"]
+        lines += ["\t".join(row + (f"hash-{row[5]}", "3")) for row in rows]
+        (objects / "index.tsv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def snapshot(self, root, kinds, rows=None, force=False, batch_size=50):
+        objects = root / "objects"
+        if rows is not None or not (objects / "index.tsv").exists():
+            self.write_index(objects, self.ROWS if rows is None else rows)
+        output = root / "catalog.json"
+        with contextlib.redirect_stdout(io.StringIO()):
+            catalog_contract.snapshot(argparse.Namespace(
+                objects=objects, kind=kinds, output=output, force=force, batch_size=batch_size,
+            ))
+        return output, json.loads(output.read_text(encoding="utf-8"))
+
+    def write_csvs(self, root, entries, place=lambda entry: entry["output_file"]):
+        csv_root = root / "csv"
         grouped = {}
-        for entry in catalog["entries"]:
-            grouped.setdefault(entry["output_file"], []).append(entry)
-        for name, entries in grouped.items():
-            (csv_root / name).parent.mkdir(parents=True, exist_ok=True)
-            with (csv_root / name).open("w", newline="", encoding="utf-8") as handle:
-                writer = csv.DictWriter(handle, fieldnames=["source_id", "source_hash", "index"])
+        for entry in entries:
+            grouped.setdefault(place(entry), []).append(entry)
+        for name, rows in grouped.items():
+            path = csv_root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["source_id", "source_hash", "purpose"])
                 writer.writeheader()
                 writer.writerows(
-                    {key: entry[key] for key in writer.fieldnames} for entry in entries
+                    {"source_id": e["source_id"], "source_hash": e["source_hash"], "purpose": "x"}
+                    for e in rows
                 )
         return csv_root
 
-    def test_root_scripts_use_visible_root_file_and_exact_coverage_passes(self):
-        scripts = [
-            {"source_file": "A.fmp12", "id": "1", "group": "", "name": "Open", "steps": []},
-            {"source_file": "A.fmp12", "id": "2", "group": "Ops", "name": "Close", "steps": []},
-            {"source_file": "A.fmp12", "id": "3", "group": "Ops", "name": "Route", "steps": []},
-        ]
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            output = self.snapshot(root, scripts)
-            catalog = json.loads(output.read_text(encoding="utf-8"))
-            root_file = catalog["entries"][0]["output_file"]
-            self.assertTrue(root_file.startswith("A.fmp12--"), root_file)
-            self.assertTrue(root_file.endswith("/_root.csv"), root_file)
-            self.assertEqual(
-                catalog["entries"][1]["output_file"], catalog["entries"][2]["output_file"]
-            )
-            csv_root = self.write_csvs(root, catalog)
-            self.assertEqual(
-                catalog_contract.verify(argparse.Namespace(catalog=output, csv_root=csv_root)), 0
-            )
+    def verify(self, catalog, csv_root):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return catalog_contract.verify(argparse.Namespace(catalog=catalog, csv_root=csv_root))
 
-    def test_same_group_in_two_files_gets_two_output_files(self):
-        scripts = [
-            {"source_file": "A.fmp12", "id": "1", "group": "Utilities", "name": "Log", "steps": []},
-            {"source_file": "B.fmp12", "id": "1", "group": "Utilities", "name": "Log", "steps": []},
-            {"source_file": "A.fmp12", "id": "2", "group": "", "name": "Open", "steps": []},
-            {"source_file": "B.fmp12", "id": "2", "group": "", "name": "Open", "steps": []},
-        ]
+    def test_one_entry_per_index_row_of_the_kind_and_full_coverage_passes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            catalog = json.loads(self.snapshot(root, scripts).read_text(encoding="utf-8"))
-            files = [entry["output_file"] for entry in catalog["entries"]]
+            output, catalog = self.snapshot(root, ["scripts"])
+            self.assertEqual([e["source_id"] for e in catalog["entries"]],
+                             [row[5] for row in self.ROWS if row[1] == "scripts"])
+            self.assertEqual(catalog["entries"][0]["source_hash"], "hash-A.fmp12/scripts/1-Open.txt")
+            self.assertEqual(self.verify(output, self.write_csvs(root, catalog["entries"])), 0)
+
+    def test_output_files_split_by_file_folder_and_batch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, catalog = self.snapshot(Path(directory), ["scripts"], batch_size=1)
+            files = [e["output_file"] for e in catalog["entries"]]
             self.assertEqual(len(set(files)), 4, files)
+            self.assertTrue(files[0].startswith("scripts/A.fmp12--"), files[0])
+            self.assertTrue(files[0].endswith("/_root-001.csv"), files[0])
+            self.assertTrue(files[2].endswith("-002.csv"), files[2])
 
-    def test_same_layout_name_with_two_ids_gets_two_output_files(self):
-        rules = [
-            {"source_file": "A.fmp12", "layout_id": "3", "layout": "List", "formula": "1"},
-            {"source_file": "A.fmp12", "layout_id": "8", "layout": "List", "formula": "1"},
-        ]
-        entries = catalog_contract.flatten("hide-rules", rules)
-        self.assertNotEqual(entries[0]["output_file"], entries[1]["output_file"])
-
-    def flat_catalog(self, root, scripts):
-        """A catalog and CSVs as built before output_file gained its folder."""
-        output = self.snapshot(root, scripts)
-        catalog = json.loads(output.read_text(encoding="utf-8"))
-        for entry in catalog["entries"]:
-            entry["output_file"] = entry["output_file"].split("/", 1)[1]
-        output.write_text(json.dumps(catalog), encoding="utf-8")
-        return output, self.write_csvs(root, catalog)
-
-    def run_snapshot(self, root, **extra):
-        return catalog_contract.snapshot(argparse.Namespace(
-            kind="scripts", spec=root / "05_scripts.json", output=root / "source_catalog.json",
-            force=False, **extra,
-        ))
-
-    def test_flat_catalog_fails_with_cause_and_rebuild_command(self):
-        scripts = [{"source_file": "A.fmp12", "id": "1", "group": "Ops", "name": "Run", "steps": []}]
+    def test_kinds_combine_and_rows_without_ids_stay_distinct(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            self.flat_catalog(root, scripts)
-            with self.assertRaises(ValueError) as caught:
-                self.run_snapshot(root)
-            message = str(caught.exception)
-            self.assertIn("per-source-file folder", message)
-            self.assertIn("--migrate-csv-root", message)
-            self.assertIn("--force", message)
+            output, catalog = self.snapshot(root, ["tables", "base-directories"])
+            self.assertEqual(catalog["count"], 3)
+            self.assertEqual(self.verify(output, self.write_csvs(root, catalog["entries"])), 0)
 
-    def test_migrate_moves_matching_rows_into_new_folders(self):
-        scripts = [
-            {"source_file": "A.fmp12", "id": "1", "group": "Utilities", "name": "Log", "steps": []},
-            {"source_file": "B.fmp12", "id": "1", "group": "Utilities", "name": "Log", "steps": []},
-            {"source_file": "A.fmp12", "id": "2", "group": "", "name": "Open", "steps": []},
-        ]
+    def test_unknown_kind_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "kind not in index"):
+                self.snapshot(Path(directory), ["layouts"])
+
+    def test_coverage_rejects_missing_duplicate_and_changed_rows(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            output, csv_root = self.flat_catalog(root, scripts)
-            self.assertEqual(len(list(csv_root.glob("*.csv"))), 2)
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.run_snapshot(root, migrate_csv_root=csv_root)
-                self.assertEqual(
-                    catalog_contract.verify(argparse.Namespace(catalog=output, csv_root=csv_root)), 0
-                )
-            self.assertEqual(len(list(csv_root.rglob("*.csv"))), 3)
-            self.assertEqual(len(list((root / "catalogs.pre-folder-layout").glob("*.csv"))), 2)
+            output, catalog = self.snapshot(root, ["scripts"])
+            entries = catalog["entries"]
+            for rows in (entries[1:], entries + entries[:1],
+                         [dict(entries[0], source_hash="other")] + entries[1:]):
+                shutil.rmtree(root / "csv", ignore_errors=True)
+                with self.assertRaisesRegex(ValueError, "coverage failed"):
+                    self.verify(output, self.write_csvs(root, rows))
 
-    def test_migrate_moves_nothing_when_a_row_hash_changed(self):
-        scripts = [{"source_file": "A.fmp12", "id": "1", "group": "Ops", "name": "Run", "steps": []}]
+    def test_coverage_rejects_a_row_outside_its_output_file(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            _, csv_root = self.flat_catalog(root, scripts)
-            scripts[0]["steps"] = ["changed"]
-            (root / "05_scripts.json").write_text(json.dumps(scripts), encoding="utf-8")
-            with self.assertRaises(ValueError):
-                self.run_snapshot(root, migrate_csv_root=csv_root)
-            self.assertEqual(len(list(csv_root.glob("*.csv"))), 1)
-            self.assertFalse((root / "catalogs.pre-folder-layout").exists())
+            output, catalog = self.snapshot(root, ["scripts"])
+            csv_root = self.write_csvs(root, catalog["entries"], place=lambda e: "all.csv")
+            with self.assertRaisesRegex(ValueError, "wrong_file=4"):
+                self.verify(output, csv_root)
 
-    def test_coverage_rejects_duplicate_missing_and_changed_rows(self):
-        scripts = [
-            {"source_file": "A.fmp12", "id": "1", "group": "", "name": "One", "steps": []},
-            {"source_file": "A.fmp12", "id": "2", "group": "", "name": "Two", "steps": []},
-        ]
+    def test_verify_fails_when_the_index_changed_after_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            output = self.snapshot(root, scripts)
-            catalog = json.loads(output.read_text(encoding="utf-8"))
-            csv_root = root / "catalogs"
-            csv_root.mkdir()
-            first = catalog["entries"][0]
-            with (csv_root / "_root.csv").open("w", newline="", encoding="utf-8") as handle:
-                writer = csv.DictWriter(handle, fieldnames=["source_id", "source_hash", "index"])
-                writer.writeheader()
-                row = {key: first[key] for key in writer.fieldnames}
-                writer.writerow(row)
-                writer.writerow(row)
-            with self.assertRaisesRegex(ValueError, "coverage failed"):
-                catalog_contract.verify(argparse.Namespace(catalog=output, csv_root=csv_root))
+            output, catalog = self.snapshot(root, ["scripts"])
+            csv_root = self.write_csvs(root, catalog["entries"])
+            rows = [row[:3] + ("Renamed",) + row[4:] if row[2] == "3" else row for row in self.ROWS]
+            self.write_index(root / "objects", rows)
+            with self.assertRaisesRegex(ValueError, "stale catalog"):
+                self.verify(output, csv_root)
 
-    def test_snapshot_refuses_changed_spec_without_force(self):
+    def test_snapshot_refuses_changed_objects_without_force(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            output = self.snapshot(
-                root,
-                [{"source_file": "A", "id": "1", "group": "", "name": "One", "steps": []}],
-            )
-            spec = root / "05_scripts.json"
-            spec.write_text(
-                json.dumps(
-                    [{"source_file": "A", "id": "1", "group": "", "name": "Changed", "steps": []}]
-                ),
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(ValueError, "source changed"):
-                catalog_contract.snapshot(
-                    argparse.Namespace(kind="scripts", spec=spec, output=output, force=False)
-                )
+            self.snapshot(root, ["scripts"])
+            changed = self.ROWS[:1]
+            with self.assertRaisesRegex(ValueError, "objects changed"):
+                self.snapshot(root, ["scripts"], rows=changed)
+            _, catalog = self.snapshot(root, ["scripts"], rows=changed, force=True)
+            self.assertEqual(catalog["count"], 1)
 
 
 class GuidanceRegressionTests(unittest.TestCase):
