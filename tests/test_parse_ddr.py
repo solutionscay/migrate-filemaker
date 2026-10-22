@@ -1082,6 +1082,13 @@ class DuplicateSourceFileTests(unittest.TestCase):
         self.assertIn(FIXTURE, err.getvalue())
         self.assertIn("/elsewhere/old_export.xml", err.getvalue())
 
+    def test_merger_refuses_duplicates_too(self):
+        a = parse_ddr.DDRFile(FIXTURE)
+        b = parse_ddr.DDRFile(FIXTURE)
+        with self.assertRaises(ValueError) as caught:
+            parse_ddr.DDRMerger([a, b])
+        self.assertIn("Mini.fmp12", str(caught.exception))
+
     def test_distinct_file_names_pass(self):
         a = parse_ddr.DDRFile(FIXTURE)
         b = parse_ddr.DDRFile(FIXTURE)

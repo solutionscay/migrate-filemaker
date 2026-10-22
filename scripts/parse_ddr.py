@@ -412,8 +412,8 @@ def find_ddr_reports(path):
     sys.exit(1)
 
 
-def check_unique_source_files(ddr_files):
-    """Stop when two inputs carry the same DDR `File name`.
+def duplicate_source_file_error(ddr_files):
+    """The error text when two inputs carry the same DDR `File name`, else None.
 
     source_file is the key that keeps ids apart across files. Two exports of
     the same file (an old and a new UI.fmp12 in one folder) would mix their
@@ -422,13 +422,22 @@ def check_unique_source_files(ddr_files):
     """
     seen = {}
     for ddr in ddr_files:
-        first = seen.setdefault(ddr.source_file, ddr.filepath)
-        if first != ddr.filepath:
-            print(f"Error: two DDR inputs have the same File name "
-                  f"'{ddr.source_file}':\n  - {first}\n  - {ddr.filepath}\n"
-                  f"Remove one of them (for example an older export) and run again.",
-                  file=sys.stderr)
-            sys.exit(1)
+        filepath = getattr(ddr, "filepath", "?")
+        if ddr.source_file in seen:
+            first = seen[ddr.source_file]
+            return (f"two DDR inputs have the same File name "
+                    f"'{ddr.source_file}':\n  - {first}\n  - {filepath}\n"
+                    f"Remove one of them (for example an older export) and run again.")
+        seen[ddr.source_file] = filepath
+    return None
+
+
+def check_unique_source_files(ddr_files):
+    """Stop the run when two inputs carry the same DDR `File name`."""
+    error = duplicate_source_file_error(ddr_files)
+    if error:
+        print(f"Error: {error}", file=sys.stderr)
+        sys.exit(1)
 
 
 # ─── WRITE HELPER ────────────────────────────────────────────────────────────
@@ -1326,6 +1335,11 @@ class DDRMerger:
     """Merges parsed data from multiple DDRFile objects into unified specs."""
 
     def __init__(self, ddr_files):
+        # Refuse duplicates here too, not only in __main__: a caller that
+        # builds the merger itself would get mixed ids otherwise.
+        error = duplicate_source_file_error(ddr_files)
+        if error:
+            raise ValueError(error)
         self.files = ddr_files
         self.multi_file = len(ddr_files) > 1
 
@@ -1842,13 +1856,11 @@ if __name__ == "__main__":
         print(f"  - {rp}")
     print(f"Output: {output_dir}\n")
 
-    # Parse each file
-    ddr_files = []
-    for rp in report_paths:
-        ddr = DDRFile(rp)
-        ddr.parse_all()
-        ddr_files.append(ddr)
+    # Read each file, refuse duplicate File names before the long parse, then parse
+    ddr_files = [DDRFile(rp) for rp in report_paths]
     check_unique_source_files(ddr_files)
+    for ddr in ddr_files:
+        ddr.parse_all()
 
     # Merge and write
     merger = DDRMerger(ddr_files)
