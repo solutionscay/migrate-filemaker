@@ -1,6 +1,33 @@
 # FileMaker DDR XML Structure Reference
 
-This document describes the exact XML paths and structure of a FileMaker Pro Database Design Report (DDR) export. Use this when the parser script encounters an unfamiliar DDR version or when you need to manually inspect/extend the extraction.
+This document describes the XML paths and structure of a FileMaker Pro Database Design Report (DDR) export. Agents do not read the XML. They read the object files that `scripts/explode_ddr.py` writes (see "Object files" below). Use this document to extend the extractors, to check an object file against its `# source:` XML path, or to handle an unfamiliar DDR version. Sections that name JSON keys (`00_topology.json`, `06_value_lists.json` and others) describe the output of `scripts/parse_ddr.py`, which the skill's steps no longer use.
+
+## Object files
+
+`explode_ddr.py RAW_DIR OBJECTS` writes one text file per catalog item under each `<File>`, at `OBJECTS/<file>/<kind>/<id>-<name>.txt`, and lists them all in `OBJECTS/index.tsv` (`file, kind, id, name, folder, path, sha256, lines`). Each file starts with a header (`# <kind> <id>: <name>`, `# file:`, `# folder:` when the item is in a folder, `# source:` with the XML path) and then shows the element tree as indented `Tag attr=value` lines.
+
+| XML catalog | Kind folder | One file per |
+|---|---|---|
+| `BaseTableCatalog` | `tables` | base table, with every field and its options |
+| `RelationshipGraph/TableList` | `table-occurrences` | table occurrence, with the relationships that touch it |
+| `RelationshipGraph/RelationshipList` | `relationships` | relationship |
+| `LayoutCatalog` | `layouts` | layout, as its object tree |
+| `ScriptCatalog` | `scripts` | script, as numbered steps |
+| `ValueListCatalog` | `value-lists` | value list |
+| `AccountCatalog` | `accounts` | account |
+| `PrivilegesCatalog` | `privilege-sets` | privilege set |
+| `ExtendedPrivilegeCatalog` | `extended-privileges` | extended privilege |
+| `AuthFileCatalog` | `auth-files` | file authorization entry |
+| `CustomFunctionCatalog` | `custom-functions` | custom function |
+| `ExternalDataSourcesCatalog` | `data-sources` | data source |
+| `CustomMenuSetCatalog` | `custom-menu-sets` | menu set |
+| `CustomMenuCatalog` | `custom-menus` | custom menu |
+| `BaseDirectoryCatalog` | `base-directories` | base-directory entry |
+| `Options` | `file` | FileMaker file (`0-options.txt`) |
+
+A catalog the extractor does not know becomes its own kind folder, named from its tag. Script and layout folders (`<Group>`) become the `folder` column. Separator scripts and layouts (`-`) are left out.
+
+Every `<Calculation>` is shown with its text after `|` and a `refs:` line built from its `<DisplayCalculation>`: fields as `TO::field#id`, custom functions as `cf:<name>`, FileMaker functions as `fn:<name>`. In script steps the step line already shows the calculation, so only the `refs:` line follows. Presentation-only elements (CSS, number and date formats, character styles, themes) are left out, except a conditional format's CSS, which shows as `Format:`. The run fails when a calculation in the XML is not in some object file. Credential-like literals are redacted.
 
 ## File Identification
 

@@ -342,36 +342,17 @@ class GuidanceRegressionTests(unittest.TestCase):
 
     def test_all_audit_remediations_remain_explicit(self):
         required = {
-            "workflows/fm-script-explorer.md": [
-                "_root.csv",
-                "structured `params` and `step_text`",
-                "populated comments",
-                "effect_owner",
+            "workflows/fm-script-explorer.md": ["--kind scripts", "Choose by effect, not by name or folder"],
+            "workflows/fm-table-explorer.md": ["--kind tables", "logic_count", "Binary"],
+            "workflows/fm-layout-explorer.md": [
+                "--kind layouts", "HideCondition", "ConditionalFormatting", "ToolTip", "FilterCalc",
+                "It does not grant access",
             ],
-            "workflows/fm-schema-builder.md": [
-                'data_type == "Binary"',
-                'data_type == "TimeStamp"',
-                "02_table_occurrences.json",
-                "compound relationship",
-                "surrogate target key only when explicitly chosen",
-            ],
-            "workflows/fm-cf-explorer.md": [
-                "format_css",
-                "Never deduplicate on formula alone",
-                "every presentation payload",
-            ],
-            "workflows/fm-hide-explorer.md": [
-                "unattributed",
-                "07_security.json",
-                'Do not call this a "complete access-control model."',
-            ],
-            "workflows/fm-ui-spec.md": [
-                "inventory-only",
-                "raw DDR layout XML",
-                "Never join hide/CF rules to an object by array position",
-            ],
+            "workflows/fm-graph-explorer.md": ["--kind relationships", "fk_candidate"],
+            "workflows/fm-security-explorer.md": ["--kind privilege-sets", "--kind extended-privileges"],
+            "reference/explorer-contract.md": ["Do not judge whether the client's logic is correct"],
             "reference/business-logic-detection.md": [
-                "ExecuteSQL (`",
+                "fn:ExecuteSQL",
                 "never exclusion filters",
                 "generic utility",
             ],

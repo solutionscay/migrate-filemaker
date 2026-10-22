@@ -11,7 +11,7 @@ source identity | inputs/context | preconditions | reads | writes | found-set sc
 calls/external effects | transaction/error behavior | result | target owner | authorization | tests
 ```
 
-Read both structured `params` and `step_text`; preserve populated comments as evidence.
+Read each numbered step and the option lines under it (called script ids, find requests, sort keys, import maps, `refs:`). Keep the developer's comment steps as evidence.
 
 ## Data operations
 

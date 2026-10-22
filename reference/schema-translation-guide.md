@@ -4,9 +4,9 @@ Use this guide to make evidenced mapping decisions. Do not generate a target sch
 
 ## Source tokens and target candidates
 
-FileMaker's UI terminology and the current parsed JSON tokens differ:
+FileMaker's UI terminology and the tokens in the table object files differ:
 
-| FileMaker UI type | Parsed `data_type` | PostgreSQL candidate | Decision required |
+| FileMaker UI type | `dataType=` | PostgreSQL candidate | Decision required |
 |---|---|---|---|
 | Text | `Text` | `TEXT`, constrained `VARCHAR`, enum/reference table | Length, collation, case/accent search, empty vs null, value-list semantics. |
 | Number | `Number` | `INTEGER`, `BIGINT`, `NUMERIC(p,s)`, `DOUBLE PRECISION` | Decimal precision, rounding, scientific values, identifiers stored as numbers. |
@@ -15,7 +15,7 @@ FileMaker's UI terminology and the current parsed JSON tokens differ:
 | Timestamp | `TimeStamp` | `TIMESTAMP` or `TIMESTAMPTZ` | Source timezone, DST policy, and local-civil-time versus instant meaning. |
 | Container | `Binary` | Object/blob reference plus metadata, or `BYTEA` | Embedded/external storage, repetitions, filenames, access, integrity, and transfer. |
 
-Inspect actual distinct tokens and fail on unknown values. `field_type` describes Normal/Calculated/Summary, not Container.
+List the distinct tokens (`grep -rhoE 'dataType=[A-Za-z]+' "$OBJECTS" | sort | uniq -c`) and stop on an unknown one. `fieldType` is `Normal`, `Calculated` or `Summary`; a container is `dataType=Binary`.
 
 For MySQL/SQLite or another target, choose semantically equivalent types after the same decisions; do not copy a PostgreSQL mapping blindly.
 
@@ -48,9 +48,9 @@ Preserve authored business/legacy identifiers. Add a surrogate `IDENTITY`/UUID o
 
 ## Table occurrences and relationships
 
-Resolve each relationship side through `02_table_occurrences.json`; an occurrence name is an alias and may point to an external file's base table.
+Resolve each relationship side through its `table-occurrences` object file; an occurrence name is an alias and may point to a base table in another file (see its data source).
 
-The parser emits operator tokens such as `Equal`, `NotEqual`, `GreaterThan`, `LessThan`, and `CartesianProduct`, not SQL punctuation. Preserve every predicate and its order.
+`JoinPredicate type=` holds tokens such as `Equal`, `NotEqual`, `GreaterThan`, `LessThan`, and `CartesianProduct`, not SQL punctuation. Preserve every predicate and its order.
 
 - `Equal` can support a foreign key only when the referenced side is proven unique and the relationship expresses identity rather than filtering.
 - Multiple equality predicates may form a composite join/foreign key.
@@ -77,11 +77,11 @@ Summary fields often depend on found set, sort order, and layout parts. Prove th
 
 ## Validation and constraints
 
-FileMaker validation may be conditional by timing, validate-if-modified state, override privilege, custom message, range, member-of-list, calculation, type, uniqueness, or non-empty setting. The current parsed field records may expose only a subset.
+FileMaker validation may be conditional by timing, validate-if-modified state, override privilege, custom message, range, member-of-list, calculation, type, uniqueness, or non-empty setting. The field's `Validation` block in the table object file shows each one.
 
 Treat SQL constraints as target product invariants:
 
-1. extract the complete rule or label it unavailable;
+1. copy the complete rule from the table object file;
 2. profile existing violations;
 3. decide whether the target deliberately strengthens behavior;
 4. define import cleanup/rejection;

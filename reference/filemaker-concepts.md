@@ -13,7 +13,7 @@ Use modern equivalents as design candidates, not mechanical translations. Verify
 | Unstored calculation | Query/view/application computation | Preserve relationship, layout, found-set, privilege, locale, and session context. |
 | Summary field | Aggregate/report query | Meaning may depend on found set, sort parts, and layout context; it is not automatically a global `GROUP BY`. |
 | Repeating field | Ordered child rows or, deliberately, an array | Determine each repetition's meaning and every script/layout dependency before normalizing. |
-| Container / JSON `Binary` | Object storage plus metadata, or database blob | Inventory embedded/external storage, repetitions, filenames, access control, integrity, and migration failures. A URL column alone is not a migration plan. |
+| Container (`dataType=Binary`) | Object storage plus metadata, or database blob | Inventory embedded/external storage, repetitions, filenames, access control, integrity, and migration failures. A URL column alone is not a migration plan. |
 | Relationship | Join/query rule; sometimes a foreign key | Resolve table occurrences, preserve every predicate/operator, and prove referenced uniqueness before adding a constraint. |
 | Allow creation of related records | Contextual create workflow | This is UI/graph behavior, not cascade insert semantics. Specify authorization and defaults. |
 | Delete related records | Candidate ownership/cascade rule | Confirm actual ownership, orphan data, and desired target behavior before `ON DELETE CASCADE`. |
@@ -42,9 +42,9 @@ Do not map a global to a process-wide variable, environment variable, or shared 
 | Button | UI invocation | Trace its script/action; persistent rules remain server-owned. |
 | Script trigger | Invocation event | Classify by effects. A trigger can invoke server domain logic, client presentation, or both. |
 | Conditional formatting | Presentation rule/domain signal | Preserve CSS/style variant and context; it is not authorization. |
-| Hide object when | UI visibility/affordance | Reconcile protected operations to server authorization. Unnamed rules need raw object attribution. |
+| Hide object when | UI visibility/affordance | Reconcile protected operations to server authorization. Identify the object by its layout object `key`. |
 
-The current parsed layout contract omits object bounds, static text, tab membership, triggers, control/value-list bindings, and stable keys for many hide/format rules. Require raw XML/screenshots before calling a UI specification implementation-ready.
+A layout object file shows each object's key, bounds, label text, field, value list, tab or popover membership, triggers, button actions, hide rule and conditional formats. It does not show the theme's styling or how the screen looks to a user; screenshots cover that.
 
 ## Scripts and found sets
 
@@ -78,10 +78,10 @@ Profile existing data and record a product decision before strengthening these r
 | Field restriction | Read/write projection and mutation authorization. |
 | Layout access | Route/page access plus underlying operation/data checks. |
 | Script/value-list access | Operation/capability and lookup-data authorization. |
-| Extended privilege | Access channel/capability; current parsed specs do not emit this catalog. |
+| Extended privilege | Access channel/capability (`extended-privileges` object files). |
 | External authentication | IdP/account mapping, invitation/reset, service principals, disabled accounts, and cutover. |
 
-Start with `07_security.json`, then supplement it with raw/manual extended privileges and UI hide/format evidence. Deny by default and test forbidden reads and writes. A hidden button is not a security boundary.
+Start with the `privilege-sets`, `accounts` and `extended-privileges` object files, then add the layout hide and format rules as UI evidence. Deny by default and test forbidden reads and writes. A hidden button is not a security boundary.
 
 ## Time semantics
 
