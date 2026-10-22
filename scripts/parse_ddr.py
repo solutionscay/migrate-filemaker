@@ -1437,7 +1437,10 @@ class DDRMerger:
             # Track cross-file script calls. `origin` tells a script step call
             # from a button call; ids are kept because script names repeat.
             for script in ddr.scripts:
-                for step in script.get("steps", []):
+                # step_line is the 1-based position, the line number Script
+                # Workspace shows. A step's own `id` is its step TYPE
+                # (1 = Perform Script), not an identity.
+                for line, step in enumerate(script.get("steps", []), start=1):
                     params = step.get("params", {})
                     if "external_file" in params:
                         ext_file = params["external_file"]
@@ -1448,7 +1451,7 @@ class DDRMerger:
                             "script": script["name"],
                             "script_id": script.get("id"),
                             "step": step.get("name"),
-                            "step_id": step.get("id"),
+                            "step_line": line,
                             "calls_script": params.get("script", ""),
                             "calls_script_id": params.get("script_id"),
                             "external_ref": ext_file,

@@ -912,7 +912,7 @@ class CrossFileScriptCallTest(unittest.TestCase):
         row = next(c for c in self.calls if c["origin"] == "script_step")
         self.assertEqual(row, {
             "origin": "script_step", "from_file": "UI.fmp12",
-            "script": "Go", "script_id": "3", "step": "Perform Script", "step_id": "4",
+            "script": "Go", "script_id": "3", "step": "Perform Script", "step_line": 1,
             "calls_script": "Save", "calls_script_id": "21",
             "external_ref": "Backend", "resolved_to": "Backend.fmp12",
             "resolved_via": "path", "matched_path": "file:Backend",

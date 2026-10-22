@@ -428,7 +428,7 @@ empty `name` also occurs; the id is kept.
 | `origin` | `script_step` or `button` |
 | `from_file` | Calling file |
 | `script`, `script_id` | Calling script (`script_step` rows only) |
-| `step`, `step_id` | Calling step name, and its id inside the script (`step_id` on `script_step` rows only) |
+| `step`, `step_line` | Calling step name, and its 1-based position in the script, the line number Script Workspace shows (`step_line` on `script_step` rows only). A `<Step>`'s own `id` is its step type (1 = Perform Script), not an identity |
 | `layout`, `layout_id`, `button_type`, `object_key`, `object_name` | Layout and button object that makes the call (`button` rows only; `object_name` is `null` when the object has no name) |
 | `calls_script`, `calls_script_id` | Target script name and id in the target file |
 | `external_ref` | `FileReference` name (External Data Source) |

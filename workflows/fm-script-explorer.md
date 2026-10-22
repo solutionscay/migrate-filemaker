@@ -61,6 +61,7 @@ Do not hard-filter "plumbing" before scoring. Navigation-like names are weak evi
 After individual classification:
 
 - Resolve `Perform Script` calls by target file and script id (`params.script_id`; `calls_script_id` in `00_topology.json` `script_calls`). Use the name only as a label: FileMaker allows duplicate script names. Label unresolved external calls.
+- A `script_calls` row with `origin: script_step` locates the call by the caller's `script_id` and `step_line` (the 1-based line number Script Workspace shows). A step's XML `id` is its step type, not an identity.
 - Count button calls as callers too. `script_calls` rows with `origin: button` name the layout and object; a button's `external_file` means the script is in another file.
 - Identify strongly connected call groups and dispatcher parameter contracts.
 - Trace each tier1 write back through its callers and forward to affected fields/tables.
