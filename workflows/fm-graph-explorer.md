@@ -9,7 +9,7 @@ python3 "$SKILL_DIR/scripts/catalog_contract.py" snapshot --objects "$OBJECTS" \
 
 ## Read
 
-- A table-occurrence file: the `Table` line (`baseTable`, `baseTableId`, and the data source when the base table is in another file), then every relationship that touches it.
+- A table-occurrence file: the `Table` line (`baseTable`, `baseTableId`), a `FileReference` line under it when the base table is in another file, then every relationship that touches it.
 - A relationship file: `LeftTable` and `RightTable` with `cascadeCreate`, `cascadeDelete` and `SortList`, then each `JoinPredicate` with its `type` (`Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual`, `CartesianProduct`) and fields.
 - For an occurrence on another file, open that file's `data-sources` object to see which file it points to. The base table id belongs to that file.
 - Where an occurrence is used: `grep -rlE '(table|name)=<TO>( |$)|<TO>::' "$OBJECTS/<file>"` (layouts, portals, scripts, calculations, value lists).
