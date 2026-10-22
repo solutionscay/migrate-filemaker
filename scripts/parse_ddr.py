@@ -20,6 +20,7 @@ Usage:
 
 import xml.etree.ElementTree as ET
 import json
+import math
 import os
 import re
 import sys
@@ -47,15 +48,24 @@ _C0_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 # StepText was never read, so most literals never reached the JSON. Fixing those
 # bugs removed the accident. Hence a deliberate redactor.
 #
-# Deliberately conservative. It only fires on a quoted literal that FOLLOWS a
-# credential-ish keyword, so it cannot touch:
-#   - field references (Table::field) or variables ($x, $$y) -- they are unquoted
-#   - a quoted string that merely CONTAINS such a word (Status = "Token")
+# Three rules, each aimed at a VALUE, never at a key or an algorithm name:
+#   1. keyword in a label or target, literal in the value position:
+#        Password: "x"   $api_key = "x"   Set Variable [ $token ; Value: "x" ]
+#        JSONSetElement ( $j ; "password" ; "x" ; JSONString )
+#      A key alone (JSONGetElement ( $j ; "access_token" )) is left alone, and so
+#      is a quoted string that merely CONTAINS such a word (Status = "Token").
+#   2. credential shapes that need no keyword: cloud access-key ids, opaque
+#      tokens (long, mixed letters and digits, high entropy), "user:pass" fed to
+#      Base64Encode.
+#   3. arguments of a plugin or built-in call that registers, connects, logs in
+#      or signs (MBS ( "Register" ; ... ), FTP_Connect ( host ; user ; pw ),
+#      CryptAuthCode ( data ; "SHA256" ; key )), except algorithm and encoding
+#      names.
 # "secret" excludes "secretary" -- Secretary_global is a real field name in this
 # domain and matching it was a false positive that badly inflated a first estimate.
 _SECRET_KEYWORD = r"(?:password|passwd|pwd|api[ _]?key|access[ _]?key|secret(?!ary)|token|credential)"
 _SECRET_RE = re.compile(
-    r'(' + _SECRET_KEYWORD + r'[^"\n]{0,40}")([^"]{4,})(")',
+    _SECRET_KEYWORD + r'[\w$.]*("?)\s*[:=;]\s*(?:Value:\s*)?"([^"]{4,})"',
     re.I,
 )
 
@@ -66,6 +76,137 @@ _redaction_count = 0
 _QUOTED_RE = re.compile(r'"([^"]{4,})"')
 # Variable, field and function names also use short forms: $pw, $pass, g_pw.
 _SECRET_NAME_RE = re.compile(_SECRET_KEYWORD + r"|(?:^|[^a-z])(?:pw|pass)(?:[^a-z]|$)", re.I)
+# Element tags whose subtree holds a credential value (Send Mail, ODBC, Re-Login ...).
+SECRET_TAGS = {"Username", "UserName", "SMTPUserName", "AccountName", "Password",
+               "SMTPPassword", "NewPassword", "OldPassword"}
+
+_ACCESS_KEY_RE = re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
+_TOKEN_CHARS_RE = re.compile(r"[A-Za-z0-9+/=_-]{20,}")
+_UUID_RE = re.compile(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
+# A call; <Function Missing> is how the DDR names a plugin function it cannot resolve.
+_CALL_RE = re.compile(r"([A-Za-z_][\w.]*|<Function Missing>)\s*\(")
+_SIGNING_CALL_RE = re.compile(
+    r"regist|connect|login|logon|auth(?!or)|hmac|licen[cs]e|signature|password|userpwd|username", re.I)
+_ENUM_ARG_RE = re.compile(
+    r"(?:SHA[-_]?\d*|MD5|RSA\w*|AES\w*|HMAC\w*|UTF-?(?:8|16)|hex|base64(?:url)?|text|binary)", re.I)
+
+
+def _entropy(s):
+    counts = {}
+    for ch in s:
+        counts[ch] = counts.get(ch, 0) + 1
+    return -sum(n / len(s) * math.log2(n / len(s)) for n in counts.values())
+
+
+def looks_like_token(value):
+    """True for an opaque credential-shaped literal: a key, licence code or signing secret."""
+    if not _TOKEN_CHARS_RE.fullmatch(value) or _UUID_RE.fullmatch(value):
+        return False  # a UUID is a record key, not a credential
+    digits = sum(ch.isdigit() for ch in value)
+    letters = sum(ch.isalpha() for ch in value)
+    if digits < 3 or letters < 3 or _entropy(value) < 3.5:
+        return False
+    # A character alphabet ("0123456789ABCDEF...") is logic, not a key.
+    run = best = 1
+    for a, b in zip(value, value[1:]):
+        run = run + 1 if ord(b) == ord(a) + 1 else 1
+        best = max(best, run)
+    return best < 5
+
+
+def _call_args(text, open_paren):
+    """(start, end) spans of the top-level arguments of the call opened at open_paren."""
+    spans, depth, start, i, in_q = [], 0, open_paren + 1, open_paren, False
+    while i < len(text):
+        ch = text[i]
+        if in_q:
+            if ch == "\\":
+                i += 1
+            elif ch == '"':
+                in_q = False
+        elif ch == '"':
+            in_q = True
+        elif ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+            if depth == 0:
+                spans.append((start, i))
+                return spans
+        elif ch == ";" and depth == 1:
+            spans.append((start, i))
+            start = i + 1
+        i += 1
+    return spans
+
+
+def secret_spans(text, strong=False):
+    """(start, end) spans of every credential literal in text, quotes excluded.
+
+    strong=True keeps only the spans that are certainly a credential (a labelled
+    password, a key shape), not every argument of a signing call."""
+    spans = []
+    if not text:
+        return spans
+    for m in _ACCESS_KEY_RE.finditer(text):
+        spans.append(m.span())
+    if '"' not in text:
+        return spans
+    for m in _SECRET_RE.finditer(text):
+        before = text[:m.start()]
+        quotes = before.count('"')
+        if m.group(1):
+            # The keyword is a quoted key: redact only "key" ; "value" in argument position.
+            open_q = before.rfind('"')
+            if quotes % 2 == 0 or not re.search(r"[;(]\s*$", before[:open_q]) \
+                    or not re.fullmatch(r"[\w .-]*", before[open_q + 1:]):
+                continue
+        elif quotes % 2:
+            continue  # the keyword is inside some other literal's text
+        if not _ENUM_ARG_RE.fullmatch(m.group(2)):
+            spans.append(m.span(2))
+    for m in re.finditer(r'"((?:[^"\\]|\\.)*)"', text):
+        value = m.group(1)
+        if looks_like_token(value):
+            spans.append(m.span(1))
+    for m in _CALL_RE.finditer(text):
+        if text[:m.start()].count('"') % 2:
+            continue
+        name = m.group(1)
+        args = _call_args(text, m.end() - 1)
+        if not args:
+            continue
+        first = text[args[0][0]:args[0][1]].strip()
+        if strong:
+            continue
+        if name.lower().startswith("base64encode"):
+            for a, b in args:
+                arg = text[a:b].strip()
+                if arg.startswith('"') and re.search(r'\w:\S', arg):  # "user:pass", not ":"
+                    spans.append((a + text[a:b].index('"') + 1, a + len(text[a:b].rstrip()) - 1))
+            continue
+        if not (_SIGNING_CALL_RE.search(name) or name == "<Function Missing>"
+                or (first.startswith('"') and _SIGNING_CALL_RE.search(first))):
+            continue
+        for a, b in args[1:]:
+            for lit in re.finditer(r'"((?:[^"\\]|\\.)+)"', text[a:b]):
+                if not _ENUM_ARG_RE.fullmatch(lit.group(1)):
+                    spans.append((a + lit.start(1), a + lit.end(1)))
+    return spans
+
+
+def _apply_spans(text, spans):
+    global _redaction_count
+    if not spans:
+        return text
+    out, last = [], 0
+    for a, b in sorted(set(spans)):
+        if a < last:
+            continue
+        out += [text[last:a], REDACTION_PLACEHOLDER]
+        last = b
+        _redaction_count += 1
+    return "".join(out) + text[last:]
 
 
 def redact_secrets(text):
@@ -75,16 +216,9 @@ def redact_secrets(text):
     an SMTP password, and where, in order to plan the migration. They just do not
     need the value in git.
     """
-    global _redaction_count
-    if not text or '"' not in text:
+    if not text or ('"' not in text and "AKIA" not in text and "ASIA" not in text):
         return text
-
-    def sub(m):
-        global _redaction_count
-        _redaction_count += 1
-        return m.group(1) + REDACTION_PLACEHOLDER + m.group(3)
-
-    return _SECRET_RE.sub(sub, text)
+    return _apply_spans(text, secret_spans(text))
 
 
 def redact_all_literals(text):
@@ -108,9 +242,36 @@ def redact_all_literals(text):
     return _QUOTED_RE.sub(sub, text)
 
 
+def value_literal_spans(text):
+    """Spans of the quoted literals in text, except a key handed to a JSON function.
+
+    For a value whose target names a credential ($token, <SMTPPassword>):
+        Set Variable [ $token ; Value: JSONGetElement ( $r ; "access_token" ) ]
+    keeps the key "access_token" and masks every other literal.
+    """
+    keys = set()
+    for m in _CALL_RE.finditer(text):
+        if m.group(1).upper().startswith("JSON") and text[:m.start()].count('"') % 2 == 0:
+            args = _call_args(text, m.end() - 1)
+            if len(args) > 1:
+                a, b = args[1]
+                lit = re.fullmatch(r'\s*"((?:[^"\\]|\\.)*)"\s*', text[a:b])
+                if lit:
+                    keys.add(a + lit.start(1))
+    return [m.span(1) for m in re.finditer(r'"((?:[^"\\]|\\.)*)"', text)
+            if len(m.group(1)) >= 1 and m.start(1) not in keys and m.group(1) != REDACTION_PLACEHOLDER]
+
+
+def redact_value_literals(text):
+    """Mask every literal value in text, keeping JSON keys (see value_literal_spans)."""
+    if not text or '"' not in text:
+        return text
+    return _apply_spans(text, value_literal_spans(text))
+
+
 def looks_like_secret_target(*names):
-    """True if any of these variable/field names names a credential."""
-    return any(n and _SECRET_NAME_RE.search(str(n)) for n in names)
+    """True if any of these variable/field/element names names a credential."""
+    return any(n and (n in SECRET_TAGS or _SECRET_NAME_RE.search(str(n))) for n in names)
 
 
 def parse_xml(path):
