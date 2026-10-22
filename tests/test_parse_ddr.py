@@ -875,10 +875,16 @@ class ExternalReferenceResolutionTest(unittest.TestCase):
         self.assertEqual(m._resolve_external_ref("UI.fmp12", "B"), "Data.fmp12")
 
     def test_name_fallback_is_marked(self):
-        ui = _StubFile("UI.fmp12", [{"name": "Data", "paths": ["file:Gone"]}])
+        ui = _StubFile("UI.fmp12", [{"name": "Data"}])
         m = parse_ddr.DDRMerger([ui, _StubFile("Data.fmp12")])
         self.assertEqual(m.resolve_external_ref_info("UI.fmp12", "Data"),
                          {"resolved_to": "Data.fmp12", "resolved_via": "name_fallback"})
+
+    def test_unmatched_path_does_not_fall_back_to_the_name(self):
+        ui = _StubFile("UI.fmp12", [{"name": "Data", "paths": ["file:Archive"]}])
+        m = parse_ddr.DDRMerger([ui, _StubFile("Data.fmp12")])
+        self.assertEqual(m.resolve_external_ref_info("UI.fmp12", "Data"),
+                         {"resolved_to": None, "resolved_via": None})
 
     def test_ambiguous_match_is_reported_not_picked(self):
         ui = _StubFile("UI.fmp12", [{"name": "X", "paths": ["file:DATA"]}])

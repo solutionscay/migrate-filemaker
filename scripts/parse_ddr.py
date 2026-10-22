@@ -1381,12 +1381,15 @@ class DDRMerger:
     def _resolve_eds(self, eds):
         """Resolve one FileMaker data source to a parsed file.
 
-        Try each path entry in order. Use the data-source name only when no
-        path entry matches a parsed file.
+        Try each path entry in order. Use the data-source name only when the
+        data source has no path: a path that matches nothing points at a file
+        that is not in the parse, and a same-named file is not that file.
         """
         info = self._resolve_paths(eds.get("paths"))
         if info is not None:
             return info
+        if eds.get("paths"):
+            return {"resolved_to": None, "resolved_via": None}
         hits = self._match_known_files(eds["name"])
         if len(hits) == 1:
             return {"resolved_to": hits[0], "resolved_via": "name_fallback"}
@@ -1419,6 +1422,8 @@ class DDRMerger:
         info = self._eds_map.get((source_file, ref_name))
         if info is not None:
             return dict(info)
+        if paths:
+            return {"resolved_to": None, "resolved_via": None}
         # No data source of that name in the file: match the reference name.
         hits = self._match_known_files(ref_name)
         if len(hits) == 1:
