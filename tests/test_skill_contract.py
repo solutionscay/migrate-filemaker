@@ -185,6 +185,7 @@ class GuidanceRegressionTests(unittest.TestCase):
             "grep -rl 'cf:TaxFor' \"$OBJECTS\" ",
             "`StrictValidation` alone",  # validates nothing without a rule
             '"$OBJECTS/<file>"',  # the file column is not the folder name
+            "option lines; use them.",  # not with Restore state=False
         ]
         for phrase in banned:
             self.assertNotIn(phrase, text)
@@ -232,7 +233,11 @@ class GuidanceRegressionTests(unittest.TestCase):
 
     def test_all_audit_remediations_remain_explicit(self):
         required = {
-            "workflows/fm-script-explorer.md": ["--kind scripts", "Choose by effect, not by name or folder"],
+            "workflows/fm-script-explorer.md": [
+                "--kind scripts", "Choose by effect, not by name or folder",
+                "prints `ref=external` and no `in=`", "drop hits on `Script id=` lines",
+                "`Restore state=True`",
+            ],
             "workflows/fm-table-explorer.md": ["--kind tables", "logic_count", "Binary"],
             "workflows/fm-layout-explorer.md": [
                 "--kind layouts", "HideCondition", "ConditionalFormatting", "ToolTip", "FilterCalc",
