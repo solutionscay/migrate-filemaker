@@ -27,7 +27,6 @@ import contextlib
 import os
 import sys
 import tempfile
-import json
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "scripts"))
@@ -170,21 +169,14 @@ EXPECTED_SCRIPTS = [
             {"id": "1", "name": "Perform Script", "enable": "True",
              "step_text": "Perform Script [ “Set User Information at Login” ]",
              "params": {"script": "Set User Information at Login", "script_id": "794"}},
-            # REDACTION: the keyword sits in the VARIABLE NAME, not in the value.
-            # <Value> is bare ("hunter2-should-not-ship"), so keyword-adjacency
-            # alone cannot see it -- looks_like_secret_target must catch it via
-            # $password. This exact case leaked when the redactor first shipped.
+            # Hardcoded values are emitted exactly as the DDR has them.
             {"id": "90", "name": "Set Variable", "enable": "True",
-             "step_text": 'Set Variable [ $password ; Value: "<REDACTED>" ]',
-             "params": {"variable": "$password", "value": '"<REDACTED>"'}},
-            # REDACTION: caught two ways over -- keyword adjacency ("api_key" =)
-            # inside the calculation, and $apikey as the target.
+             "step_text": 'Set Variable [ $password ; Value: "hunter2-from-the-ddr" ]',
+             "params": {"variable": "$password", "value": '"hunter2-from-the-ddr"'}},
             {"id": "91", "name": "Set Variable", "enable": "True",
-             "step_text": 'Set Variable [ $apikey ; Value: "<REDACTED>" ]',
-             "params": {"calculation": 'Let ( $api_key = "<REDACTED>" ; $api_key )',
+             "step_text": 'Set Variable [ $apikey ; Value: "AKIAIOSFODNN7EXAMPLE" ]',
+             "params": {"calculation": 'Let ( $api_key = "AKIAIOSFODNN7EXAMPLE" ; $api_key )',
                         "variable": "$apikey"}},
-            # MUST NOT REDACT: "Token" is INSIDE the quotes and the field refs are
-            # unquoted. A redactor that fires here is eating business logic.
             {"id": "92", "name": "Set Field", "enable": "True",
              "step_text": 'Set Field [ Intakes::Status; If ( Intakes::Kind = "Token" ; "yes" ; "no" ) ]'},
             {"id": "2", "name": "Set Field", "enable": "True",
@@ -650,47 +642,18 @@ class GoldenFixtureTest(unittest.TestCase):
         self.assertEqual(self.ddr._count_catalog("ScriptCatalog", "Script",
                                                  skip_separators=True), 2)
 
-    # ─── REDACTION ──────────────────────────────────────────────────────
+    # ─── VALUES ─────────────────────────────────────────────────────────
 
-    def test_no_secret_literal_reaches_the_parsed_output(self):
-        """The parser is the boundary between the gitignored raw DDR and the
-        COMMITTED specs. Nothing that looks like a credential value may cross it.
-
-        This is the backstop for the whole redaction feature: it greps the entire
-        emitted structure rather than checking a field, so a secret arriving via
-        some future param name still trips it."""
-        blob = json.dumps(self.results)
-        for leaked in ("hunter2-should-not-ship", "AKIAIOSFODNN7EXAMPLE"):
-            self.assertNotIn(leaked, blob,
-                             f"{leaked!r} reached the parsed specs -- the specs are "
-                             f"committed to git, the raw DDR is not")
-
-    def test_redaction_preserves_structure(self):
-        """Mask the value, keep the shape. An analyst still has to see THAT a step
-        sets an SMTP password, and where, to plan the migration."""
+    def test_step_values_are_emitted_verbatim(self):
+        """A hardcoded value reaches the specs exactly as the DDR has it, in the
+        step text, the value and the calculation."""
         step = self._step("90")
         self.assertEqual(step["step_text"],
-                         'Set Variable [ $password ; Value: "<REDACTED>" ]')
-        self.assertEqual(step["params"]["variable"], "$password")
-
-    def test_redaction_catches_secret_named_by_its_target_not_its_value(self):
-        """Set Variable [ $password ; Value: "hunter2" ] -- <Value> is bare, so
-        keyword-adjacency cannot see it. The variable NAME is the only signal.
-        This leaked when the redactor first shipped; the fixture caught it."""
-        self.assertEqual(self._step("90")["params"]["value"], '"<REDACTED>"')
-
-    def test_redaction_catches_secret_inside_a_calculation(self):
+                         'Set Variable [ $password ; Value: "hunter2-from-the-ddr" ]')
+        self.assertEqual(step["params"]["value"], '"hunter2-from-the-ddr"')
         self.assertEqual(self._step("91")["params"]["calculation"],
-                         'Let ( $api_key = "<REDACTED>" ; $api_key )')
-
-    def test_redaction_does_not_eat_business_logic(self):
-        """A quoted string that merely CONTAINS a credential word is not a secret,
-        and unquoted field refs never are. Over-redacting silently destroys logic
-        -- the same failure mode as the bug this parser was audited for, pointed
-        the other way."""
-        step = self._step("92")
-        self.assertIn('Intakes::Kind = "Token"', step["step_text"])
-        self.assertNotIn("REDACTED", step["step_text"])
+                         'Let ( $api_key = "AKIAIOSFODNN7EXAMPLE" ; $api_key )')
+        self.assertIn('Intakes::Kind = "Token"', self._step("92")["step_text"])
 
     def _step(self, step_id):
         for script in self.results["scripts"]:

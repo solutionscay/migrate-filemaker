@@ -46,7 +46,7 @@ Bulk operations must include an explicit authorized predicate or record-id set. 
 | Assign/revoke roles |  |  |  |  |
 | Provision/rotate service principal |  |  |  |  |
 
-The DDR contains no password or password hash. Include a local password-change operation only when discovery selected local credential ownership; otherwise use the IdP's supported reset/invite flow.
+The DDR contains no password or password hash. Include a local password-change operation only when discovery selected local accounts; otherwise use the IdP's supported reset/invite flow.
 
 ## Authorization matrix
 
@@ -60,13 +60,12 @@ Default deny. Route/operation checks, row filters, field restrictions, and UI vi
 
 ## External integrations
 
-| Integration | Direction | Trigger/operation | Contract | Credential reference | Retry/idempotency | Audit/reconciliation |
+| Integration | Direction | Trigger/operation | Contract | Secret reference | Retry/idempotency | Audit/reconciliation |
 |---|---|---|---|---|---|---|
 |  | inbound / outbound / bidirectional |  |  | managed secret only |  |  |
 
 - FileMaker `Insert from URL` proves an outbound request, not an inbound webhook.
 - An inbound webhook requires separate provider/receiver evidence, signature verification, replay protection, and idempotency.
-- Do not copy credential literals from DDR scripts/calculations.
 - Client-side mail (`Send Mail` via the e-mail client) and embedded web viewers are integrations too. A web viewer URL that carries a key moves that key to the server.
 
 ## Background jobs
@@ -92,7 +91,7 @@ A FileMaker "show dialog, then continue" step is a business rule when it guards 
 | Idempotency |  |
 | Rate/size/pagination limits |  |
 | Audit actor/reason/correlation |  |
-| Sensitive-field logging/redaction |  |
+| Sensitive-field logging/masking |  |
 
 ## Traceability and tests
 

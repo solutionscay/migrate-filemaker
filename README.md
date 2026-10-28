@@ -19,7 +19,7 @@ FileMaker exports a DDR as one large XML file per database file. A 300 MB DDR is
 - Python 3. No packages.
 - The full DDR XML export: one XML file per FileMaker file, plus `Summary.xml` if you have it
 
-The DDR can hold passwords and API keys in plain text. The exploded files redact them; the raw XML does not.
+The DDR is client data, and the exploded files carry every value exactly as the DDR has it. Keep both out of version control.
 
 ## Install
 
@@ -27,7 +27,7 @@ Clone the repo into your agent's skills folder. Then ask for `$migrate-filemaker
 
 ## How it works
 
-1. Extract. `explode_ddr.py` writes one text file per object, an `index.tsv` of all of them, a `LEGEND.md` for the codes, and an `unresolved.tsv` of references to deleted or missing targets. It stops if any calculation, attribute or credential check fails.
+1. Extract. `explode_ddr.py` writes one text file per object, an `index.tsv` of all of them, a `LEGEND.md` for the codes, and an `unresolved.tsv` of references to deleted or missing targets. It stops if any calculation or attribute check fails.
 2. Inventory. Count what is there and how the files connect.
 3. Read every object. Nine explorers (scripts, tables, layouts, graph, security, value lists, menus, custom functions, file settings) each read their kind and write one CSV row per object. `catalog_contract.py verify` proves nothing was skipped.
 4. Ask. List what the DDR cannot answer: goals, users, identity, integrations, which behaviors to keep.

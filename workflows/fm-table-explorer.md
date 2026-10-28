@@ -21,7 +21,7 @@ Each `Field` block shows `dataType` (`Text`, `Number`, `Date`, `Time`, `TimeStam
 - `overwriteExistingValue=True`: the auto-enter replaces a value already in the field. `alwaysEvaluate=True`: an unstored-style recalculation on every change of a referenced field, even for a stored result.
 - A field can have `calculation=True` or `fieldType=Calculated` and no `Calculation` block: the DDR omits the formula (the object file says `(no formula in DDR)`). Tag it as usual and put `formula not in DDR` in the meaning.
 - A formula that is only a comment (`// ... //`, or `1 // old formula`) returns empty or a constant. Say so in the meaning.
-- Field names that look like credentials (password, token, secret): record the field and its logic, never a value, and raise it in `open_question`.
+- Treat a value as secret only where that matters to the plan: the target must keep it out of code (an integration's login or signing key). A value that only looks like one (a JSON key, a status word, a field name) is ordinary logic. Write `secret` in `open_question` for a field that holds such a value.
 
 Find who uses a field with `grep -rl '<Table>::<field>#<id>' "$OBJECTS"` when its meaning depends on its callers. A table occurrence name can differ from the base table name; the `table-occurrences` files map one to the other.
 

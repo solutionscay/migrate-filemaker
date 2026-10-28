@@ -27,7 +27,7 @@ This document describes the XML paths and structure of a FileMaker Pro Database 
 
 A catalog the extractor does not know becomes its own kind folder, named from its tag. Script and layout folders (`<Group>`) become the `folder` column. Separator scripts and layouts (`-`) are left out.
 
-Every `<Calculation>` is shown with its text after `|` and a `refs:` line built from its `<DisplayCalculation>`: fields as `TO::field#id`, custom functions as `cf:<name>`, FileMaker functions as `fn:<name>`. In script steps the step line already shows the calculation, so only the `refs:` line follows. Presentation-only elements (CSS, number and date formats, character styles, themes) are left out, except a conditional format's CSS, which shows as `Format:`. The run fails when a calculation in the XML is not in some object file. Credential-like literals are redacted.
+Every `<Calculation>` is shown with its text after `|` and a `refs:` line built from its `<DisplayCalculation>`: fields as `TO::field#id`, custom functions as `cf:<name>`, FileMaker functions as `fn:<name>`. In script steps the step line already shows the calculation, so only the `refs:` line follows. Presentation-only elements (CSS, number and date formats, character styles, themes) are left out, except a conditional format's CSS, which shows as `Format:`. The run fails when a calculation in the XML is not in some object file. Every value is shown as the DDR has it.
 
 ## File Identification
 

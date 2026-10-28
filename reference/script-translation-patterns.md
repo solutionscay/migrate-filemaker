@@ -69,15 +69,15 @@ Do not label every script attached to `OnObjectEnter`, `OnObjectModify`, `OnReco
 
 | FileMaker construct | Direction/target | Required checks |
 |---|---|---|
-| `Insert from URL` | Outbound HTTP/client request | URL/method/body/headers, redacted credentials, response parsing, timeout, TLS, retry/idempotency, and egress policy. It is not evidence of an inbound webhook. |
+| `Insert from URL` | Outbound HTTP/client request | URL/method/body/headers, authentication, response parsing, timeout, TLS, retry/idempotency, and egress policy. It is not evidence of an inbound webhook. |
 | `Open URL` | User navigation or outbound invocation | Determine whether a browser opens or an integration protocol is called. |
 | `Send Mail` | Outbound email service/job | Recipients, templates, attachments, audit, retry, and failure handling. |
 | Import/export | Inbound/outbound file pipeline | Found-set scope, field order, encoding, filenames, overwrite, scheduling, and rejected rows. |
 | `ExecuteSQL()` | FileMaker calculation query | Parse calculation inputs and query semantics; parameterize the target equivalent. |
-| `Execute SQL` | ODBC script step | Identify external DSN/database, SQL, bindings, transaction, and credentials. |
+| `Execute SQL` | ODBC script step | Identify external DSN/database, SQL, bindings, transaction, and authentication. |
 | Plugin/external script | Adapter or replacement workflow | Inventory availability, side effects, platform dependence, and missing code. |
 
-Never print or copy credential literals from DDR calculations. Document only their source location and purpose, then replace them with managed secret references.
+Treat a value as secret only where that matters to the plan: when the target must keep it out of code, record its source location and purpose and plan a managed secret for it.
 
 ## Transactions, errors, and concurrency
 

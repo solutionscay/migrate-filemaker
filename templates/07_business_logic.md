@@ -66,7 +66,7 @@ Conditional formatting and hide rules can reveal states and exceptions; they do 
 
 ## Bulk and integration safety
 
-| Source operation | Reconstructed scope/direction | Credential handling | Retry/idempotency | Target contract | Failure tests |
+| Source operation | Reconstructed scope/direction | Secret handling | Retry/idempotency | Target contract | Failure tests |
 |---|---|---|---|---|---|
 |  |  | managed-secret reference only |  |  |  |
 
@@ -84,4 +84,3 @@ Never translate `Replace Field Contents` to an unqualified update. `Insert from 
 - [ ] Every logic-bearing catalog row has a disposition.
 - [ ] Every tier1 rule cites its object file and step number or field id.
 - [ ] Every tier1 rule names its semantic tests (found-set, null/empty, boundary, unauthorized, error, retry, as they apply). Building the fixtures belongs to the implementation, not to this plan.
-- [ ] No credential literal appears in this document.

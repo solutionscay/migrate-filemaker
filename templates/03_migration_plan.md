@@ -30,7 +30,7 @@ Say whether increments go live one at a time or only set build order. When modul
 - [ ] Repository/runtime versions and CI quality gates are reproducible.
 - [ ] Database schema decisions resolve source keys, TO aliases, compound relationships, validation changes, containers, and timezone policy.
 - [ ] Identity provisioning and default-deny authorization skeleton exist before user data operations.
-- [ ] Audit actor/time/reason and sensitive logging/redaction rules are defined.
+- [ ] Audit actor/time/reason and sensitive-field logging/masking rules are defined.
 - [ ] Backup, restore, observability, secret management, and environment promotion are tested.
 - [ ] Source-to-target traceability identifiers are retained.
 
@@ -65,7 +65,7 @@ Keep outbound `Insert from URL` replacements separate from inbound webhook endpo
 - [ ] Freeze/version each source export with hashes, counts, encoding, timezone, and export criteria.
 - [ ] Export stable source identifiers and relationship keys.
 - [ ] Inventory container files with size/content hash and missing/corrupt status.
-- [ ] Redact/separate secrets; never commit raw credential-bearing exports.
+- [ ] Never commit raw DDR exports.
 - [ ] Record rejected source rows without silently dropping them.
 
 ### Transform and load
@@ -133,5 +133,4 @@ Document the point after which rollback requires data reconciliation rather than
 - [ ] Every source security dimension has an enforcement owner and negative test.
 - [ ] Every relationship predicate and target key is resolved or explicitly open.
 - [ ] Data validation exceeds counts/samples and all rejects are accounted for.
-- [ ] No credential literal appears in committed artifacts.
 - [ ] Rollback, restore, and cutover rehearsal evidence is recorded.

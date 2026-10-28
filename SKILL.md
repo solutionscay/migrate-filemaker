@@ -11,7 +11,7 @@ Take the DDR apart into every object, read every object, and write the migration
 
 1. Record what the FileMaker solution does, as written, with the object file as evidence. Do not judge whether its logic is correct. That is not the job.
 2. Label each statement in an artifact as fact (from an object file), inference, product decision, or unavailable. Never invent behavior the DDR does not show.
-3. Raw DDR XML is client data. Keep it out of version control. Never copy credentials into any artifact; the tools redact the ones they find.
+3. Raw DDR XML is client data. Keep it out of version control.
 
 ## Paths
 
@@ -32,7 +32,8 @@ python3 "$SKILL_DIR/scripts/explode_ddr.py" "$RAW_DIR" "$OUT_DIR/objects"
 - `objects/index.tsv` lists every object: file, kind, id, name, folder, path, hash, lines.
 - `objects/LEGEND.md` explains the markers and every code that appears in the object files. Read it once before Step 3.
 - `objects/unresolved.tsv` lists every reference whose target is deleted (`ref=none`, `ref=missing`) or in a file that was not exported (`ref=external`).
-- The run stops with an error if any calculation, attribute or credential check fails. Fix the extraction before going on.
+- The run stops with an error if any calculation or attribute check fails. Fix the extraction before going on.
+- Object files carry every value exactly as the DDR has it.
 
 The object files are the reading surface. Find usage with `grep -rl 'Invoices::total#' "$OUT_DIR/objects"`, then read the hits in full.
 
@@ -116,4 +117,3 @@ Write the result to `09_audit.md`. The operator decides which gaps matter. A gap
 - Every kind in `objects/index.tsv` is in one explorer's catalog, and `catalog_contract.py verify` passes for every explorer.
 - Every artifact in Step 5 exists, cites object files, and lists its open decisions.
 - `09_audit.md` lists every gap and the part of the plan it affects.
-- No artifact contains a credential.

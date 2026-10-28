@@ -48,7 +48,7 @@ Verify every referenced target column exists and represents the same concept. Re
 
 ## Field-level policies
 
-| Entity/field | Role/capability | Read | Create/write | Update | Redaction/omission behavior | Source restriction | Tests |
+| Entity/field | Role/capability | Read | Create/write | Update | Masking/omission behavior | Source restriction | Tests |
 |---|---|---|---|---|---|---|---|
 |  |  |  |  |  |  |  |  |
 
@@ -95,13 +95,13 @@ Hosted FileMaker globals default to per-client/session scope. Client/session cla
 
 ## Service principals and integrations
 
-| Principal/integration | Direction | Allowed operations/data | Credential owner/rotation | Network/access channel | Audit/tests |
+| Principal/integration | Direction | Allowed operations/data | Secret owner/rotation | Network/access channel | Audit/tests |
 |---|---|---|---|---|---|
 |  |  |  | managed secret reference |  |  |
 
 ## Negative authorization tests
 
-| Test id | Identity/role | Attempt | Expected denial/filter/redaction | Layer exercised | Evidence |
+| Test id | Identity/role | Attempt | Expected denial/filter/masking | Layer exercised | Evidence |
 |---|---|---|---|---|---|
 |  |  | forbidden create/read/update/delete/field/operation/channel |  |  |  |
 
@@ -123,4 +123,3 @@ Include direct API/server calls that bypass the UI, cross-record ownership attem
 - [ ] Hide/CF rules are secondary UI evidence only.
 - [ ] Identity provisioning covers resets/IdP, disabled users, and service principals.
 - [ ] Negative tests pass through non-UI entry points.
-- [ ] No credential literal appears in this document.

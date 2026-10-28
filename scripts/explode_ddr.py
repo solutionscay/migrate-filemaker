@@ -11,11 +11,11 @@ rendered generically, so a catalog this script has never heard of still lands on
 disk instead of vanishing.
 
 Only presentation is left out (CSS, fonts, character styles, theme definitions).
+Every value is written as the DDR has it.
 The run checks its own coverage and fails loudly when:
   - a <Calculation> was not shown (its text, or proof that the step text shows it);
   - an element, attribute or text class of the raw XML reached no object file and
-    is not on the presentation list below;
-  - a credential value from the raw XML is still in some object file.
+    is not on the presentation list below.
 
 Output:
     OUT_DIR/<file-slug>/<kind>/<id>-<name>.txt
@@ -32,11 +32,8 @@ import sys
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import parse_ddr  # noqa: E402
 from parse_ddr import (  # noqa: E402
-    REDACTION_PLACEHOLDER, _strip_fm_extension, find_ddr_reports, looks_like_secret_target,
-    looks_like_token, parse_xml, path_target_name, redact_all_literals, redact_secrets,
-    redact_value_literals, reference_paths, secret_spans, value_literal_spans,
+    _strip_fm_extension, find_ddr_reports, parse_xml, path_target_name, reference_paths,
 )
 
 # Subtrees the generic walk does not print. Each is either presentation or read by a
@@ -117,8 +114,6 @@ CATALOG_KIND = {
     "BaseDirectoryCatalog": "base-directories",
 }
 
-# Tags whose value is a user name: masked where it is set, but not hunted elsewhere.
-USER_TAGS = {"Username", "UserName", "SMTPUserName", "AccountName"}
 _LINE_BREAK = re.compile("\r\n?|[\n\x0b\x0c\x1c-\x1e\x85\u2028\u2029]")
 _IDENT = re.compile(r"[A-Za-z_][\w.]*")
 
@@ -265,7 +260,7 @@ class Renderer:
                 out.append(f"{kind}:{one_line(text)}")
         return list(dict.fromkeys(out))
 
-    def calc(self, el, parent, depth, secret, show_text=True, inactive=False):
+    def calc(self, el, parent, depth, show_text=True, inactive=False):
         self.seen.add(id(el))
         self.mark(el, el.attrib, text=True)
         pad = "  " * depth
@@ -279,8 +274,7 @@ class Renderer:
         attrs = " ".join(f"{k}={_q(v)}" for k, v in el.attrib.items())
         flag = " (inactive)" if inactive else ""
         lines = [f"{pad}Calculation{(' ' + attrs) if attrs else ''}{flag}:"]
-        text = redact(raw, secret)
-        for ln in lines_of(text) if text else [""]:
+        for ln in lines_of(raw) if raw else [""]:
             lines.append(f"{pad}  | {ln}")
         if refs:
             lines.append(f"{pad}  refs: {', '.join(refs)}")
@@ -367,7 +361,7 @@ class Renderer:
                 if int(v) & ~sum(BITS[(tag, k)]):
                     names.append("?")
                 v = f"{v}({'+'.join(names)})"
-            attrs[k] = redact_secrets(v)
+            attrs[k] = v
         if tag == "Validation" and el.get("valuelist") == "True" and el.find("ValueList") is None:
             attrs["valuelist"] = "True(list-not-named-in-DDR)"
         style = el.find("Styles/CustomStyles/Name")
@@ -474,13 +468,12 @@ class Renderer:
             return f" ref={status}"
         return ""
 
-    def element(self, el, depth=0, secret=False, calc_text=True, parent=None, defn=False, inactive=False):
+    def element(self, el, depth=0, calc_text=True, parent=None, defn=False, inactive=False):
         tag = el.tag
         if tag in SKIP:
             return []
-        secret = secret or looks_like_secret_target(tag)
         if tag == "Calculation":
-            return self.calc(el, parent, depth, secret, show_text=calc_text, inactive=inactive)
+            return self.calc(el, parent, depth, show_text=calc_text, inactive=inactive)
         pad = "  " * depth
         flag = "(inactive) " if inactive else ""
         if tag == "TextObj":
@@ -494,7 +487,7 @@ class Renderer:
             label = "".join(d.text or "" for d in datas).strip()
             attrs = self.attrs(el, parent)
             head = f"{pad}Text" + "".join(f" {k}={_q(v)}" for k, v in attrs.items())
-            label_lines = lines_of(redact_secrets(label))
+            label_lines = lines_of(label)
             if not label:
                 out = [head] if attrs else []
             elif len(label_lines) == 1:
@@ -505,7 +498,7 @@ class Renderer:
             if fmt:
                 out.append(f"{pad}  {fmt}")
             return out + [ln for c in el if c.tag not in SKIP
-                          for ln in self.element(c, depth + 1, secret, calc_text, parent=el)]
+                          for ln in self.element(c, depth + 1, calc_text, parent=el)]
         if tag == "Format":
             # A conditional format's effect is its CSS; 500pt text is how FileMaker hides things.
             self.mark(el, el.attrib)
@@ -520,7 +513,7 @@ class Renderer:
             if calc is not None:
                 self.seen.add(id(calc))
                 self.mark(calc, calc.attrib, text=True)
-                label = one_line(redact(calc.text or "", secret))
+                label = one_line(calc.text or "")
             n = list(parent).index(el) + 1
             fa = "".join(f" {k}={_q(v)}" for k, v in el.attrib.items())
             return [f"{pad}Button {n}{fa}: {label}" if label else f"{pad}Button {n}{fa}"]
@@ -554,12 +547,11 @@ class Renderer:
         off = self.inactive_children(el)
         sub = list(pre)
         for c in children:
-            sub += self.element(c, depth + 1, secret, calc_text, parent=el, inactive=c.tag in off)
+            sub += self.element(c, depth + 1, calc_text, parent=el, inactive=c.tag in off)
         if not attrs and not text and not sub:
             return []  # a wrapper whose content was all presentation or already shown
         head = pad + flag + tag + "".join(f" {k}={_q(v)}" for k, v in attrs.items())
         lines = []
-        text = redact(text, secret)
         tlines = lines_of(text) if text else []
         if len(tlines) == 1 and len(text) < 160:
             lines.append(f"{head}: {text}")
@@ -578,8 +570,6 @@ class Exploder:
         self.unresolved = []
         self.counts = Counter()
         self.catalogs = {}       # file stem (lower case) -> Catalog
-        self.secrets = set()     # raw credential values, quoted when the quotes matter
-        self.leaks = []          # (path, kind of value) for every credential that did
         self.bad_lines = []      # paths with a line break a reader would split differently
 
     def write(self, src, kind, oid, name, folder, xpath, header_extra, body):
@@ -594,9 +584,6 @@ class Exploder:
         text = "\n".join(head + [""] + body) + "\n"
         if len(text.splitlines()) != text.count("\n"):
             self.bad_lines.append(rel)
-        for v in self.secrets:
-            if v in text:
-                self.leaks.append((rel, f"{len(v.strip(chr(34)))}-char value"))
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text)
         self.rows.append((src, kind, oid, name, folder, rel,
@@ -664,8 +651,7 @@ class Exploder:
                              f"table {ref.get('catalogName')}.{ref.get('schemaName')}.{ref.get('tableName')}")
             body = []
             for f in fields:
-                secret = looks_like_secret_target(f.get("name"))
-                body += self.r.element(f, 0, secret, defn=True)
+                body += self.r.element(f, 0, defn=True)
                 ae = f.find("AutoEnter")
                 if (f.get("fieldType") == "Calculated" and f.find("Calculation") is None) or \
                         (ae is not None and ae.get("calculation") == "True" and ae.find("Calculation") is None):
@@ -736,23 +722,6 @@ class Exploder:
             if st.get("id") == "89" and st.find("Text") is not None:
                 self.r.mark(st.find("Text"), text=True)  # comment text; StepText holds it
             text = raw or ("#" if st.get("id") == "89" else st.get("name") or "")
-            # The target is a variable (<Name>$pw</Name>) or a field (<Field name=...>).
-            secret = looks_like_secret_target(st.findtext("Name"),
-                                              *[f.get("name") for f in st.findall("Field")])
-            text = redact(text, secret)
-            # StepText repeats the step's calculations, sometimes with less context (a plugin
-            # call shows as <Function Missing>): mask there what is masked in the calculation.
-            for c in st:
-                for calc in c.iter("Calculation"):
-                    ctext = calc.text or ""
-                    if looks_like_secret_target(c.tag):
-                        spans = value_literal_spans(ctext)
-                    else:
-                        spans = secret_spans(ctext)
-                    for a, b in spans:
-                        v = quoted(ctext, a, b)
-                        if len(v) > 2:
-                            text = text.replace(v, v.replace(v.strip('"'), REDACTION_PLACEHOLDER))
             if not on and text.startswith("//"):
                 text = text[2:].lstrip()
             first, *rest = lines_of(text)
@@ -765,7 +734,7 @@ class Exploder:
             for c in st:
                 if c.tag == "StepText" or (st.get("id") == "89" and c.tag == "Text"):
                     continue
-                body += [f"{'':>8}{ln}" for ln in self.r.element(c, 0, secret, calc_text=False, parent=st)]
+                body += [f"{'':>8}{ln}" for ln in self.r.element(c, 0, calc_text=False, parent=st)]
             self.r.step_text = ""
         options = " ".join(f"{k}={v}" for k, v in sc.attrib.items() if k not in ("id", "name"))
         extra = [f"steps: {len(steps)} ({disabled} disabled)", f"options: {options}"]
@@ -812,9 +781,8 @@ class Exploder:
                     rest.append(c)
                 else:
                     name = c.get("name") or c.findtext("Name") or c.tag
-                    secret = "all" if kind == "custom-functions" and _secret_function(c) else False
                     self.write(src, kind, c.get("id"), name, path, f"{cat.tag}/{c.tag}[@id={c.get('id')}]",
-                               [], self.r.element(c, 0, secret, defn=True))
+                               [], self.r.element(c, 0, defn=True))
         walk(cat, "")
         if cat.attrib or rest:
             body = [" ".join(f"{k}={_q(v)}" for k, v in cat.attrib.items())] if cat.attrib else []
@@ -833,37 +801,7 @@ class Exploder:
                 cat = Catalog(file_el)
                 self.catalogs[cat.stem] = cat
                 files.append((root, cat))
-                self.collect_secrets(file_el)
         return files
-
-    def collect_secrets(self, file_el):
-        """Every credential value in the raw XML; the write gate checks no file holds one."""
-        def add(text, everything=False):
-            # From a credential context, a literal that is the whole value or has a key's
-            # shape ("Bearer " & $key is not a secret; "hunter22" alone is).
-            text = (text or "").strip()
-            if everything:
-                vals = [f'"{text[a:b]}"' for a, b in value_literal_spans(text)
-                        if (a == 1 and b == len(text) - 1) or looks_like_token(text[a:b])]
-            else:
-                vals = [quoted(text, a, b) for a, b in secret_spans(text, strong=True)]
-            self.secrets.update(v for v in vals if len(v.strip('"')) >= 6 and REDACTION_PLACEHOLDER not in v)
-        for el in file_el.iter():
-            if el.tag in USER_TAGS:
-                continue  # a user name also appears in logic (Get ( AccountName ) = "x")
-            if looks_like_secret_target(el.tag):
-                for c in el.iter("Calculation"):
-                    add(c.text, everything=True)
-            elif el.tag in ("Calculation", "StepText"):
-                add(el.text)
-        for st in file_el.iter("Step"):
-            if looks_like_secret_target(st.findtext("Name"), *[f.get("name") for f in st.findall("Field")]):
-                for c in st.iter("Calculation"):
-                    add(c.text, everything=True)
-        for cf in file_el.iterfind("CustomFunctionCatalog//CustomFunction"):
-            if _secret_function(cf):
-                for c in cf.iter("Calculation"):
-                    add(c.text, everything=True)
 
     def explode(self, paths):
         """Yield (file, raw calculations, shown calculations, uncovered classes) per <File>."""
@@ -943,7 +881,6 @@ class Exploder:
             "- In a script, a step option shows only its `refs:` line when the step text already",
             "  shows the calculation; otherwise the full calculation is printed under the option.",
             "- `¶` in a single-line value is a line break in the raw value.",
-            "- `<REDACTED>` replaces a credential value. The structure around it is kept.",
             "- `<Field Missing>`, `<Table Missing>`, `<Function Missing>`, `<unknown>` are",
             "  FileMaker's own markers in the DDR for a deleted target.",
             "- `Field: TO::name#id rep=r/max` on a layout field gives the field id from DDRInfo.",
@@ -1036,31 +973,19 @@ class Exploder:
 
 
 def _char(code):
-    """A separator stored as a character code: 44 -> ','; 0 or absent -> ''."""
-    return chr(int(code)) if code and code.isdigit() and code != "0" else ""
+    """A separator stored as a character code: 44 -> ','; 0 or absent -> ''.
 
-
-def quoted(text, a, b):
-    """The value at text[a:b], with its quotes when it is a whole literal."""
-    if a > 0 and b < len(text) and text[a - 1] == '"' and text[b] == '"':
-        return text[a - 1:b + 1]
-    return text[a:b]
-
-
-def redact(text, secret):
-    """secret="all": every literal; True: every value literal; False: credential shapes only."""
-    if secret == "all":
-        return redact_all_literals(text)
-    return redact_value_literals(text) if secret else redact_secrets(text)
+    FileMaker also writes codes that are no character (56144, a lone UTF-16
+    surrogate): they show as U+DB50, since a strict UTF-8 write rejects them.
+    """
+    if not (code and code.isdigit() and code != "0"):
+        return ""
+    n = int(code)
+    return f"U+{n:04X}" if 0xD800 <= n <= 0xDFFF or n > 0x10FFFF else chr(n)
 
 
 def _num(v):
     return int(v) if str(v).isdigit() else 0
-
-
-def _secret_function(cf):
-    # A zero-arity function whose name reads like a credential returns the secret itself.
-    return looks_like_secret_target(cf.get("name"))
 
 
 def main():
@@ -1086,15 +1011,11 @@ def main():
                 print(f"    {k}", file=sys.stderr)
             failed = True
     ex.write_index()
-    for rel, what in ex.leaks:
-        print(f"  ERROR: a credential ({what}) survived in {rel}", file=sys.stderr)
-        failed = True
     for rel in ex.bad_lines:
         print(f"  ERROR: a raw line break survived in {rel}", file=sys.stderr)
         failed = True
     for kind, n in sorted(ex.counts.items()):
         print(f"  {kind}: {n}")
-    print(f"  credential values redacted: {parse_ddr._redaction_count}")
     statuses = Counter(r[-1] for r in ex.unresolved)
     print(f"  unresolved references: {len(ex.unresolved)} "
           f"({', '.join(f'{k} {v}' for k, v in sorted(statuses.items())) or 'none'})")

@@ -2,6 +2,7 @@ import contextlib
 import glob
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -105,6 +106,42 @@ GAPS = """<?xml version="1.0" encoding="UTF-16"?>
 """
 
 
+# A date format whose separator code is a lone UTF-16 surrogate (0xDB50), as FileMaker
+# writes in the wild. Once crashed the strict UTF-8 write of the layout file (issue #12).
+SURROGATE = """<?xml version="1.0" encoding="UTF-16"?>
+<FMPReport type="Report" version="22.0.6">
+<File name="Repro.fmp12" path="host">
+  <BaseTableCatalog>
+    <BaseTable id="1" name="T"><FieldCatalog>
+      <Field id="1" dataType="Date" fieldType="Normal" name="d"/>
+    </FieldCatalog></BaseTable>
+  </BaseTableCatalog>
+  <RelationshipGraph>
+    <TableList><Table id="100" baseTableId="1" baseTable="T" name="T"/></TableList>
+    <RelationshipList/>
+  </RelationshipGraph>
+  <LayoutCatalog>
+    <Layout id="5" name="Form">
+      <Table id="100" name="T"/>
+      <Object type="Field" key="1" flags="0">
+        <FieldObj numOfReps="1" displayType="0" flags="0">
+          <Name>T::d</Name>
+          <ExtendedAttributes fontHeight="10" graphicFormat="0">
+            <DateFormat format="168" charStyle="0" monthStyle="231" dayStyle="11" separator="56144">
+              <DateElement>0</DateElement>
+              <DateElementSep index="0"></DateElementSep>
+            </DateFormat>
+          </ExtendedAttributes>
+          <DDRInfo><Field name="d" id="1" repetition="1" maxRepetition="1" table="T"/></DDRInfo>
+        </FieldObj>
+      </Object>
+    </Layout>
+  </LayoutCatalog>
+</File>
+</FMPReport>
+"""
+
+
 def explode(paths, out):
     ex = explode_ddr.Exploder(out)
     with contextlib.redirect_stdout(io.StringIO()):
@@ -130,7 +167,6 @@ class FixtureTest(unittest.TestCase):
             for _src, raw, shown, uncovered in results:
                 self.assertEqual(raw, shown)
                 self.assertEqual(uncovered, [])
-            self.assertEqual(ex.leaks, [])
             self.assertEqual(ex.bad_lines, [])
             with open(os.path.join(out, "index.tsv"), encoding="utf-8") as fh:
                 rows = fh.read().splitlines()[1:]
@@ -174,7 +210,6 @@ class GapTest(unittest.TestCase):
         for _src, raw, shown, uncovered in self.results:
             self.assertEqual(raw, shown)
             self.assertEqual(uncovered, [])
-        self.assertEqual(self.ex.leaks, [])
         self.assertEqual(self.ex.bad_lines, [])
 
     def test_layout_field_has_id_repetition_and_value_list_id(self):
@@ -226,12 +261,15 @@ class GapTest(unittest.TestCase):
         self.assertIn("(inactive):", table)
         self.assertNotIn("constant=False", table)  # its ConstantData is empty: nothing inactive
 
-    def test_credentials_masked_keys_and_algorithms_kept(self):
-        for secret in ("s3cretPa55", "wJalrXUtnFEMI7K7MDENG9bPxRfiCYEXAMPLEKEY", "Odbc-pw-123", '"mailer"', "dbuser"):
-            self.assertNotIn(secret, self.all)
+    def test_values_are_written_as_the_ddr_has_them(self):
         script = self.file("scripts", "9-")
-        self.assertIn('"SHA256"', script)
+        self.assertIn('Password: "s3cretPa55"', script)
+        self.assertIn('"wJalrXUtnFEMI7K7MDENG9bPxRfiCYEXAMPLEKEY"', script)
+        self.assertIn('"mailer"', script)
         self.assertIn('"access_token"', script)
+        source = self.file("data-sources", "2-")
+        self.assertIn('"Odbc-pw-123"', source)
+        self.assertIn('"dbuser"', source)
 
     def test_catalog_attributes_have_a_file(self):
         self.assertIn("requireAuthorization=True", self.file("auth-files", "catalog-"))
@@ -245,11 +283,50 @@ class GapTest(unittest.TestCase):
         _ex, results = explode([raw], os.path.join(self.tmp.name, "extra", "out"))
         self.assertIn("DDRInfo/Mystery", results[0][3])
 
-    def test_write_gate_catches_a_leaked_credential(self):
-        ex = explode_ddr.Exploder(os.path.join(self.tmp.name, "leak"))
-        ex.secrets.add('"s3cretPa55"')
-        ex.write("Gaps.fmp12", "scripts", "1", "x", "", "x", [], ['Set Field [ t::f ; "s3cretPa55" ]'])
-        self.assertEqual(len(ex.leaks), 1)
+
+class CliTest(unittest.TestCase):
+    """The command line run exits 0 and writes every value as the DDR has it."""
+
+    def test_run_exits_zero_with_values_verbatim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = os.path.join(tmp, "raw")
+            os.makedirs(raw)
+            with open(os.path.join(raw, "Gaps.xml"), "w", encoding="utf-16") as fh:
+                fh.write(GAPS)
+            out = os.path.join(tmp, "out")
+            run = subprocess.run([sys.executable, os.path.join(HERE, "..", "scripts", "explode_ddr.py"), raw, out],
+                                 capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertNotIn("ERROR", run.stderr)
+            self.assertEqual(sorted(f for f in os.listdir(out) if not os.path.isdir(os.path.join(out, f))),
+                             ["LEGEND.md", "index.tsv", "unresolved.tsv"])
+            self.assertIn("s3cretPa55", "\n".join(read_all(out).values()))
+
+
+class SeparatorCodeTest(unittest.TestCase):
+    """A separator code that is no character shows as U+XXXX instead of crashing the write."""
+
+    def test_char_decodes_real_codes_and_marks_the_rest(self):
+        self.assertEqual(explode_ddr._char("44"), ",")
+        self.assertEqual(explode_ddr._char("0"), "")
+        self.assertEqual(explode_ddr._char(None), "")
+        self.assertEqual(explode_ddr._char("56144"), "U+DB50")
+        self.assertEqual(explode_ddr._char("57343"), "U+DFFF")
+        self.assertEqual(explode_ddr._char("1114112"), "U+110000")
+
+    def test_surrogate_date_separator_explodes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = os.path.join(tmp, "Repro.xml")
+            with open(raw, "w", encoding="utf-16") as fh:
+                fh.write(SURROGATE)
+            out = os.path.join(tmp, "out")
+            ex, results = explode([raw], out)
+            for _src, raw_calcs, shown, uncovered in results:
+                self.assertEqual(raw_calcs, shown)
+                self.assertEqual(uncovered, [])
+            self.assertEqual(ex.bad_lines, [])
+            layout = read_all(out)[os.path.join("Repro.fmp12", "layouts", "5-Form.txt")]
+            self.assertIn("separator=U+DB50", layout)
 
 
 if __name__ == "__main__":
