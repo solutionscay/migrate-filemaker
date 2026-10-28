@@ -45,12 +45,12 @@ Write CSVs with Python's `csv` module so quotes and newlines stay valid. A list 
 
 1. Open the object file and read every line. The header gives its kind, id, name, file, folder and source XML path.
 2. Calculations show their full text after `|` and a `refs:` line with the fields (`TO::field#id`), custom functions (`cf:`) and FileMaker functions (`fn:`) they use.
-3. Follow references with grep, then read the hits in full:
+3. Follow references with grep, then read the hits in full. `<file-dir>` is the file's folder under `objects/`: the first part of `source_id` (`Picker_Module.fmp12`), not the `file` column (`Picker Module.fmp12`), which can hold spaces and names no folder.
 
    ```bash
    grep -rl 'Invoices::total#' "$OBJECTS"                         # who uses a field
-   grep -rl 'cf:TaxFor' "$OBJECTS/<file>"                         # who calls a custom function in one file
-   grep -rlE 'Script id=42 name=' "$OBJECTS/<file>"               # who calls script 42 in one file
+   grep -rl 'cf:TaxFor' "$OBJECTS/<file-dir>"                     # who calls a custom function in one file
+   grep -rlE 'Script id=42 name=' "$OBJECTS/<file-dir>"           # who calls script 42 in one file
    ```
 
 4. Cite evidence as an object file path, `objects/<file>/<kind>/<id>-<name>.txt`, plus a step number, field id or layout object key when that helps.

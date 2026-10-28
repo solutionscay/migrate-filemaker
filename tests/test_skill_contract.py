@@ -184,6 +184,7 @@ class GuidanceRegressionTests(unittest.TestCase):
             "grep -rl 'cf:<name>' \"$OBJECTS\"`",  # custom functions are file-local
             "grep -rl 'cf:TaxFor' \"$OBJECTS\" ",
             "`StrictValidation` alone",  # validates nothing without a rule
+            '"$OBJECTS/<file>"',  # the file column is not the folder name
         ]
         for phrase in banned:
             self.assertNotIn(phrase, text)
@@ -239,7 +240,9 @@ class GuidanceRegressionTests(unittest.TestCase):
             ],
             "workflows/fm-graph-explorer.md": ["--kind relationships", "fk_candidate"],
             "workflows/fm-security-explorer.md": ["--kind privilege-sets", "--kind extended-privileges"],
-            "reference/explorer-contract.md": ["Do not judge whether the client's logic is correct"],
+            "reference/explorer-contract.md": [
+                "Do not judge whether the client's logic is correct", "`<file-dir>` is the file's folder",
+            ],
             "reference/business-logic-detection.md": [
                 "fn:ExecuteSQL",
                 "never exclusion filters",

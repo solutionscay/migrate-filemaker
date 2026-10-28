@@ -11,7 +11,7 @@ python3 "$SKILL_DIR/scripts/catalog_contract.py" snapshot \
 
 - The `CustomFunction` line (parameters, `visible`) and the full calculation body, including commented-out parts.
 - The `refs:` line: other custom functions (`cf:`), fields and context functions such as `fn:Get`.
-- The callers: `grep -rl 'cf:<name>' "$OBJECTS/<file>"`. A custom function belongs to its own file; a hit in another file is a same-named function there. Callers can be fields, scripts, layouts, menus or other functions. A `cf:` hit can be a parameter of the same name in another function (the DDR types it as a function); check the caller's parameter list before you count it.
+- The callers: `grep -rl 'cf:<name>' "$OBJECTS/<file-dir>"`. A custom function belongs to its own file; a hit in another file is a same-named function there. Callers can be fields, scripts, layouts, menus or other functions. A `cf:` hit can be a parameter of the same name in another function (the DDR types it as a function); check the caller's parameter list before you count it.
 
 ## Record
 
