@@ -10,7 +10,7 @@ python3 "$SKILL_DIR/scripts/catalog_contract.py" snapshot --objects "$OBJECTS" \
 ## Read
 
 - A table-occurrence file: the `Table` line (`baseTable`, `baseTableId`), a `FileReference` line under it when the base table is in another file, then every relationship that touches it.
-- A relationship file: `LeftTable` and `RightTable` with `cascadeCreate`, `cascadeDelete` and `SortList`, then each `JoinPredicate` with its `type` (`Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual`, `CartesianProduct`) and fields.
+- A relationship file: `LeftTable` and `RightTable` with `cascadeCreate`, `cascadeDelete` and `SortList`, then each `JoinPredicate` with its `type` (`Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqualTo`, `LessThan`, `LessThanOrEqualTo`, `CartesianProduct`) and fields.
 - For an occurrence on another file, open that file's `data-sources` object to see which file it points to. The base table id belongs to that file.
 - Where an occurrence is used: `grep -rlE 'table="?<TO>"?( |$)|(^|[^A-Za-z0-9_])<TO>::' "$OBJECTS/<file>"` (layouts, portals, scripts, calculations, value lists, privilege sets). Quote the name when it has spaces or ends in a space (`table="Supervisors_All "`). `name=<TO>` also matches layouts and scripts of the same name; drop those hits. Occurrences named only inside `ExecuteSQL` text (`FROM`/`JOIN`) need a grep on the quoted name; drop hits in field comments and `/* */` comments. Disabled script steps count as a use; say so in `used_by`.
 

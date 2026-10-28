@@ -8,7 +8,7 @@ Use these signals to decide which objects need the closest reading. They are fea
 2. **ExecuteSQL calculation calls**: `grep -rl 'fn:ExecuteSQL' "$OBJECTS"` finds every calculation that calls it. This is a FileMaker calculation function. Keep it distinct from the `Execute SQL` ODBC script step.
 3. **Multi-entity orchestration**: writes to several base tables, compound transaction/error handling, or dependencies across called scripts.
 4. **Branching/calculation complexity**: nested `Case`/`If`, domain thresholds, date windows, rounding/allocation, state transitions, or dense computed writes.
-5. **Custom-function calls**: `grep -rl 'cf:<name>' "$OBJECTS"` finds the callers; read the function's object file and each caller. A custom function may be a generic utility; its existence alone is not a domain signal.
+5. **Custom-function calls**: `grep -rl 'cf:<name>' "$OBJECTS/<file>"` finds the callers in the function's own file; read the function's object file and each caller. A custom function may be a generic utility; its existence alone is not a domain signal.
 6. **Authorization and routing decisions**: privilege-set checks, account/role state, record ownership predicates, field/layout access, and scripts that select a destination based on access.
 7. **External effects**: outbound HTTP/email/export/import, ODBC, filesystem/plugin activity, or calls to missing FileMaker files.
 8. **Auto-enter that overwrites**: an auto-enter calculation with `overwriteExistingValue=True` that sets a status, flag or derived domain value on every change. It is a state rule even though no script runs it.

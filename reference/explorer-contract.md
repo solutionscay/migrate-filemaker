@@ -49,7 +49,7 @@ Write CSVs with Python's `csv` module so quotes and newlines stay valid. A list 
 
    ```bash
    grep -rl 'Invoices::total#' "$OBJECTS"                         # who uses a field
-   grep -rl 'cf:TaxFor' "$OBJECTS"                                # who calls a custom function
+   grep -rl 'cf:TaxFor' "$OBJECTS/<file>"                         # who calls a custom function in one file
    grep -rlE 'Script id=42 name=' "$OBJECTS/<file>"               # who calls script 42 in one file
    ```
 

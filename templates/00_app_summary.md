@@ -24,7 +24,7 @@ Cite evidence as object file paths: `objects/<file>/<kind>/<id>-<name>.txt`.
 | Privilege sets / accounts / extended privileges |  |  |
 | Custom menus / menu sets |  |  |
 
-Take each count from `cut -f1,2 objects/index.tsv | sort | uniq -c`.
+Take each count from `tail -n +2 objects/index.tsv | cut -f1,2 | sort | uniq -c`.
 
 ## Files and references
 

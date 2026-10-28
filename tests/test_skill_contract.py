@@ -177,6 +177,13 @@ class GuidanceRegressionTests(unittest.TestCase):
             "Any script attached to a script trigger",
             "custom functions are almost always",
             "framework 2025",
+            "`GreaterThanOrEqual`,",  # the DDR writes GreaterThanOrEqualTo
+            "`LessThanOrEqual`,",
+            "cut -f1,2 objects/index.tsv",  # counts the header row
+            "cut -f2 \"$OBJECTS/index.tsv\"",
+            "grep -rl 'cf:<name>' \"$OBJECTS\"`",  # custom functions are file-local
+            "grep -rl 'cf:TaxFor' \"$OBJECTS\" ",
+            "`StrictValidation` alone",  # validates nothing without a rule
         ]
         for phrase in banned:
             self.assertNotIn(phrase, text)

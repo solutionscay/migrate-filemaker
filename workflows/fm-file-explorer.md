@@ -3,7 +3,7 @@
 Kinds: `file`, `data-sources`, `auth-files`, `base-directories`, and any kind in `objects/index.tsv` that no other explorer names. One CSV row per object file. Follow [../reference/explorer-contract.md](../reference/explorer-contract.md).
 
 ```bash
-cut -f2 "$OBJECTS/index.tsv" | sort | uniq -c        # list every kind; add the unclaimed ones below
+tail -n +2 "$OBJECTS/index.tsv" | cut -f2 | sort | uniq -c   # list every kind; add the unclaimed ones below
 python3 "$SKILL_DIR/scripts/catalog_contract.py" snapshot --objects "$OBJECTS" \
   --kind file --kind data-sources --kind auth-files --kind base-directories \
   --output "$OUT_DIR/explorers/file/catalog.json"
