@@ -1,5 +1,7 @@
 # migrate-filemaker
 
+English | [日本語](README.ja.md)
+
 ![migrate-filemaker: from a FileMaker DDR to a verified, documented rebuild plan](assets/banner.png)
 
 ![status](https://img.shields.io/badge/status-active%20development-orange)

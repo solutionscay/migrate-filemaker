@@ -329,5 +329,29 @@ class SeparatorCodeTest(unittest.TestCase):
             self.assertIn("separator=U+DB50", layout)
 
 
+class JapaneseNameTest(unittest.TestCase):
+    """Japanese names keep their letters in paths, and two file names never share a folder."""
+
+    def test_japanese_names_keep_their_name_and_do_not_collide(self):
+        doc = ('<?xml version="1.0" encoding="UTF-16"?><FMPReport type="Report" version="22.0.6">'
+               '<File name="{}" path="host"><BaseTableCatalog>'
+               '<BaseTable id="12" name="請求書"><FieldCatalog/></BaseTable>'
+               '</BaseTableCatalog></File></FMPReport>')
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = []
+            for i, name in enumerate(["請求書?.fmp12", "請求書*.fmp12"]):
+                paths.append(os.path.join(tmp, f"{i}.xml"))
+                with open(paths[-1], "w", encoding="utf-16") as fh:
+                    fh.write(doc.format(name))
+            ex, _ = explode(paths, os.path.join(tmp, "out"))
+            rels = sorted(row[5] for row in ex.rows)
+            self.assertEqual(len(set(os.path.dirname(os.path.dirname(r)) for r in rels)), 2)
+            for rel in rels:
+                self.assertTrue(rel.startswith("請求書_.fmp12--"))
+                self.assertTrue(rel.endswith(os.path.join("tables", "12-請求書.txt")))
+        self.assertEqual(explode_ddr.slug("a/b:c*?.txt."), "a_b_c_.txt")
+        self.assertEqual(len(explode_ddr.slug("請" * 100, 80)), 66)  # byte cap, whole characters
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,7 @@ import hashlib
 import json
 import re
 import sys
+import unicodedata
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
@@ -31,8 +32,9 @@ INDEX_COLUMNS = ("file", "kind", "id", "name", "folder", "path", "sha256", "line
 
 
 def slug(value: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip()).strip("._")
-    return cleaned[:60] or "unnamed"
+    # Same rule as explode_ddr.slug: letters and digits of any script are kept.
+    cleaned = re.sub(r"[^\w.-]+", "_", unicodedata.normalize("NFC", value.strip())).strip("._")
+    return cleaned[:60].strip("._") or "unnamed"
 
 
 def short_hash(value: str) -> str:

@@ -39,7 +39,7 @@ Every CSV starts with these columns, copied from the catalog entry:
 source_id,source_hash,kind,file,id,name,...explorer columns...
 ```
 
-Write CSVs with Python's `csv` module so quotes and newlines stay valid. A list cell (one line per field, rule or button) holds one item per line inside the quoted cell; write `none` when it has no items. Inside a line, `|` separates parts; put a name or label that contains `|` in double quotes. Use the explorer's enums exactly. When the object file does not show something, write `unresolved` and put the question in `open_question`. Never fill a cell with a guess.
+Write CSVs with Python's `csv` module so quotes and newlines stay valid. A list cell (one line per field, rule or button) holds one item per line inside the quoted cell; write `none` when it has no items. Inside a line, `|` separates parts; put a name or label that contains `|` in double quotes. Use the explorer's enums exactly. Write free-text cells in the user's language. Keep column names, enum values, `none` and `unresolved` in English, and copy `source_id`, `source_hash`, names and ids verbatim. When the object file does not show something, write `unresolved` and put the question in `open_question`. Never fill a cell with a guess.
 
 ## How to read an object
 

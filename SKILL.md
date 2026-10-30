@@ -12,6 +12,7 @@ Take the DDR apart into every object, read every object, and write the migration
 1. Record what the FileMaker solution does, as written, with the object file as evidence. Do not judge whether its logic is correct. That is not the job.
 2. Label each statement in an artifact as fact (from an object file), inference, product decision, or unavailable. Never invent behavior the DDR does not show.
 3. Raw DDR XML is client data. Keep it out of version control.
+4. Write the artifacts in the user's language. Keep these in English: template headings, CSV column names, and enum and code values (`fact`, `inference`, `drop-candidate`, `unused`, `none found`, `unresolved`, `none` and the like). Scripts and later steps match these strings exactly. Copy FileMaker names, ids and paths as the object file has them.
 
 ## Paths
 

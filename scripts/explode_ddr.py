@@ -29,6 +29,7 @@ import hashlib
 import os
 import re
 import sys
+import unicodedata
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -118,9 +119,20 @@ _LINE_BREAK = re.compile("\r\n?|[\n\x0b\x0c\x1c-\x1e\x85\u2028\u2029]")
 _IDENT = re.compile(r"[A-Za-z_][\w.]*")
 
 
+SLUG_BYTES = 200  # under the 255-byte name limit, with room for id prefix and hash suffix
+
+
 def slug(value, limit=60):
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", (value or "").strip()).strip("._")
-    return cleaned[:limit] or "unnamed"
+    """Letters and digits of any script, plus . _ -; everything else becomes _.
+
+    The limit counts characters, so a cut never splits one. A byte cap keeps a
+    name of 3- or 4-byte characters under the filesystem limit.
+    """
+    text = unicodedata.normalize("NFC", (value or "").strip())
+    cleaned = re.sub(r"[^\w.-]+", "_", text).strip("._")[:limit]
+    while len(cleaned.encode("utf-8")) > SLUG_BYTES:
+        cleaned = cleaned[:-1]
+    return cleaned.strip("._") or "unnamed"
 
 
 def lines_of(text):
@@ -573,7 +585,7 @@ class Exploder:
         self.bad_lines = []      # paths with a line break a reader would split differently
 
     def write(self, src, kind, oid, name, folder, xpath, header_extra, body):
-        rel = os.path.join(slug(src, 80), kind, f"{oid}-{slug(name)}.txt")
+        rel = os.path.join(self.r.cat.slug, kind, f"{oid}-{slug(name)}.txt")
         path = os.path.join(self.out, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         head = [f"# {SINGULAR.get(kind, kind)} {oid}: {one_line(name)}", f"# file: {src}"]
@@ -801,6 +813,15 @@ class Exploder:
                 cat = Catalog(file_el)
                 self.catalogs[cat.stem] = cat
                 files.append((root, cat))
+        # Two file names can share a slug (punctuation dropped, case-insensitive disk).
+        # Give each of them a hash of its own name, so their folders stay apart.
+        by_slug = defaultdict(list)
+        for _root, cat in files:
+            by_slug[cat.slug.lower()].append(cat)
+        for cats in by_slug.values():
+            if len(cats) > 1:
+                for cat in cats:
+                    cat.slug = f"{cat.slug}--{hashlib.sha256(cat.name.encode('utf-8')).hexdigest()[:8]}"
         return files
 
     def explode(self, paths):
