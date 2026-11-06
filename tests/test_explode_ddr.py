@@ -142,6 +142,57 @@ SURROGATE = """<?xml version="1.0" encoding="UTF-16"?>
 """
 
 
+# Items has an inactive lookup that names Orders field 6, and no field 6 of its own.
+NESTED_FIELD = """<?xml version="1.0" encoding="UTF-16"?>
+<FMPReport type="Report" version="22.0.6">
+<File name="Nested.fmp12" path="host">
+  <BaseTableCatalog>
+    <BaseTable id="1" name="Orders"><FieldCatalog>
+      <Field id="1" dataType="Text" fieldType="Normal" name="code"/>
+      <Field id="6" dataType="Text" fieldType="Normal" name="note"/>
+    </FieldCatalog></BaseTable>
+    <BaseTable id="2" name="Items"><FieldCatalog>
+      <Field id="1" dataType="Text" fieldType="Normal" name="sku">
+        <AutoEnter allowEditing="True" lookup="False">
+          <Lookup><Field table="Orders" id="6" name="note"/></Lookup>
+        </AutoEnter>
+      </Field>
+    </FieldCatalog></BaseTable>
+    <BaseTable id="3" name="OldForm">
+      <Field id="4" dataType="Text" fieldType="Normal" name="kept"/>
+    </BaseTable>
+  </BaseTableCatalog>
+  <RelationshipGraph>
+    <TableList>
+      <Table id="100" baseTableId="1" baseTable="Orders" name="Orders"/>
+      <Table id="101" baseTableId="2" baseTable="Items" name="Items"/>
+      <Table id="102" baseTableId="3" baseTable="OldForm" name="OldForm"/>
+    </TableList>
+    <RelationshipList/>
+  </RelationshipGraph>
+  <ScriptCatalog>
+    <Script id="9" name="Check">
+      <StepList>
+        <Step enable="True" id="76" name="Set Field">
+          <StepText>Set Field [ Items::&lt;Field Missing&gt; ]</StepText>
+          <Field table="Items" id="6" name=""/>
+        </Step>
+        <Step enable="True" id="76" name="Set Field">
+          <StepText>Set Field [ Items::sku ]</StepText>
+          <Field table="Items" id="1" name="sku"/>
+        </Step>
+        <Step enable="True" id="76" name="Set Field">
+          <StepText>Set Field [ OldForm::kept ]</StepText>
+          <Field table="OldForm" id="4" name="kept"/>
+        </Step>
+      </StepList>
+    </Script>
+  </ScriptCatalog>
+</File>
+</FMPReport>
+"""
+
+
 def explode(paths, out):
     ex = explode_ddr.Exploder(out)
     with contextlib.redirect_stdout(io.StringIO()):
@@ -327,6 +378,48 @@ class SeparatorCodeTest(unittest.TestCase):
             self.assertEqual(ex.bad_lines, [])
             layout = read_all(out)[os.path.join("Repro.fmp12", "layouts", "5-Form.txt")]
             self.assertIn("separator=U+DB50", layout)
+
+
+class NestedDefinitionTest(unittest.TestCase):
+    """Only a real definition counts: a reference nested in a definition proves nothing."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        raw = os.path.join(cls.tmp.name, "Nested.xml")
+        with open(raw, "w", encoding="utf-16") as fh:
+            fh.write(NESTED_FIELD)
+        cls.out = os.path.join(cls.tmp.name, "out")
+        cls.ex, cls.results = explode([raw], cls.out)
+        cls.script = read_all(cls.out)[os.path.join("Nested.fmp12", "scripts", "9-Check.txt")]
+        with open(os.path.join(cls.out, "unresolved.tsv"), encoding="utf-8") as fh:
+            cls.rows = fh.read().splitlines()[1:]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_field_named_only_by_a_lookup_is_not_a_field_of_that_table(self):
+        self.assertIn("Field table=Items id=6 ", self.script)
+        self.assertIn('id=6 name="" ref=missing', self.script)
+        self.assertIn(os.path.join("Nested.fmp12", "scripts", "9-Check.txt") + "\tField\t6\t\tmissing", self.rows)
+
+    def test_real_fields_still_resolve_in_both_forms(self):
+        self.assertNotIn("id=1 name=sku ref=", self.script)
+        self.assertNotIn("id=4 name=kept ref=", self.script)  # a table with no FieldCatalog wrapper
+        self.assertEqual(len(self.rows), 1)
+
+    def test_lookup_reference_to_a_real_field_still_resolves(self):
+        self.assertFalse(any(r.startswith(os.path.join("Nested.fmp12", "tables")) for r in self.rows))
+
+    def test_base_table_named_inside_a_definition_gets_no_file(self):
+        doc = NESTED_FIELD.replace('<Lookup><Field', '<BaseTable id="88" name="Ghost"/><Lookup><Field')
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = os.path.join(tmp, "Nested.xml")
+            with open(raw, "w", encoding="utf-16") as fh:
+                fh.write(doc)
+            ex, _ = explode([raw], os.path.join(tmp, "out"))
+            self.assertEqual(sorted(r[2] for r in ex.rows if r[1] == "tables"), ["1", "2", "3"])
 
 
 class JapaneseNameTest(unittest.TestCase):

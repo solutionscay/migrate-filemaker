@@ -167,6 +167,12 @@ def css_props(el):
     return " ".join(props)
 
 
+def field_definitions(table):
+    """The <Field> definitions of a <BaseTable>. A <Field> nested deeper is a reference
+    (a lookup source, a furigana field), not a field of this table."""
+    return table.findall("FieldCatalog/Field") or table.findall("Field")
+
+
 class Catalog:
     """Ids of one <File>, read before rendering so references can be checked."""
 
@@ -178,7 +184,7 @@ class Catalog:
         self.tables, self.fields = {}, defaultdict(set)
         for t in file_el.iterfind("BaseTableCatalog/BaseTable"):
             self.tables[t.get("id")] = t.get("name")
-            for f in t.iter("Field"):
+            for f in field_definitions(t):
                 self.fields[t.get("id")].add(f.get("id"))
         self.tos = {t.get("name"): t for t in file_el.iterfind("RelationshipGraph/TableList/Table")}
         self.to_ids = {t.get("id") for t in self.tos.values()}
@@ -642,12 +648,12 @@ class Exploder:
 
     def tables(self, src, cat):
         self.r.mark(cat)
-        for t in cat.iter("BaseTable"):
+        for t in cat.iterfind("BaseTable"):
             self.r.mark(t, t.attrib)
             fc = t.find("FieldCatalog")
             if fc is not None:
                 self.r.mark(fc)
-            fields = t.findall("FieldCatalog/Field") or t.findall("Field")
+            fields = field_definitions(t)
             extra = [f"fields: {len(fields)}", f"records: {t.get('records')}"]
             if (t.get("comment") or "").strip():
                 extra.append(f"comment: {t.get('comment')}")
