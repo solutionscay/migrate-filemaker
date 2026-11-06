@@ -331,6 +331,62 @@ MARKERS = """<?xml version="1.0" encoding="UTF-16"?>
 """
 
 
+# One reference per class that was checked poorly or printed ref=missing with no row.
+CHECKS = """<?xml version="1.0" encoding="UTF-16"?>
+<FMPReport type="Report" version="22.0.6">
+<File name="Checks.fmp12" path="host">
+  <BaseTableCatalog>
+    <BaseTable id="1" name="Orders"><FieldCatalog>
+      <Field id="1" dataType="Text" fieldType="Normal" name="code"/>
+    </FieldCatalog></BaseTable>
+    <BaseTable id="2" name="Linked">
+      <DataSourceRef name="GoneSource" catalogName="c" schemaName="s" tableName="t"/>
+      <FieldCatalog><Field id="1" dataType="Text" fieldType="Normal" name="x"/></FieldCatalog>
+    </BaseTable>
+  </BaseTableCatalog>
+  <RelationshipGraph>
+    <TableList>
+      <Table id="100" baseTableId="1" baseTable="Orders" name="Orders"/>
+      <Table id="101" baseTableId="77" baseTable="GoneBase" name="NoBase"/>
+    </TableList>
+    <RelationshipList>
+      <Relationship id="5">
+        <LeftTable name="Orders"/>
+        <RightTable name="GoneTO"/>
+      </Relationship>
+    </RelationshipList>
+  </RelationshipGraph>
+  <ScriptCatalog>
+    <Script id="1" name="Good"><StepList>
+      <Step enable="True" id="99" name="Some Step">
+        <StepText>Some Step</StepText>
+        <FieldList>
+          <FieldReference id="1" name="code"><TableOccurrenceReference id="100" name="Orders"/></FieldReference>
+        </FieldList>
+      </Step>
+    </StepList></Script>
+    <Script id="2" name="GoneField"><StepList>
+      <Step enable="True" id="99" name="Some Step">
+        <StepText>Some Step</StepText>
+        <FieldList>
+          <FieldReference id="44" name="old"><TableOccurrenceReference id="100" name="Orders"/></FieldReference>
+        </FieldList>
+      </Step>
+    </StepList></Script>
+    <Script id="3" name="GoneOccurrence"><StepList>
+      <Step enable="True" id="99" name="Some Step">
+        <StepText>Some Step</StepText>
+        <FieldList>
+          <FieldReference id="1" name="code"><TableOccurrenceReference id="555" name="GoneTO"/></FieldReference>
+        </FieldList>
+      </Step>
+    </StepList></Script>
+  </ScriptCatalog>
+</File>
+</FMPReport>
+"""
+
+
 def explode(paths, out):
     ex = explode_ddr.Exploder(out)
     with contextlib.redirect_stdout(io.StringIO()):
@@ -681,6 +737,45 @@ class TextMarkerTest(unittest.TestCase):
         self.assertIn("`<File Missing>`", self.legend)
         self.assertIn("marker 15", self.legend)
         self.assertIn("English", self.legend)
+
+
+class ChecksBase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        raw = os.path.join(cls.tmp.name, "Checks.xml")
+        with open(raw, "w", encoding="utf-16") as fh:
+            fh.write(CHECKS)
+        cls.out = os.path.join(cls.tmp.name, "out")
+        cls.ex, cls.results = explode([raw], cls.out)
+        cls.files = read_all(cls.out)
+        with open(os.path.join(cls.out, "unresolved.tsv"), encoding="utf-8") as fh:
+            cls.rows = [line.split("\t") for line in fh.read().splitlines()[1:]]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def rows_of(self, kind, prefix):
+        where = os.path.join("Checks.fmp12", kind, prefix)
+        return [r[1:] for r in self.rows if r[0].startswith(where)]
+
+
+class ReferenceTagCheckTest(ChecksBase):
+    """FieldReference and TableOccurrenceReference are checked by id like any other reference."""
+
+    def test_resolving_references_have_no_row(self):
+        self.assertEqual(self.rows_of("scripts", "1-"), [])
+
+    def test_field_reference_to_a_deleted_field_has_a_row(self):
+        self.assertEqual(self.rows_of("scripts", "2-"), [["FieldReference", "44", "old", "missing"]])
+        text = self.files[os.path.join("Checks.fmp12", "scripts", "2-GoneField.txt")]
+        self.assertIn("FieldReference id=44 name=old ref=missing", text)
+
+    def test_deleted_occurrence_has_one_row_on_the_occurrence(self):
+        self.assertEqual(self.rows_of("scripts", "3-"), [["TableOccurrenceReference", "555", "GoneTO", "missing"]])
+        text = self.files[os.path.join("Checks.fmp12", "scripts", "3-GoneOccurrence.txt")]
+        self.assertIn("TableOccurrenceReference id=555 name=GoneTO ref=missing", text)
 
 
 class JapaneseNameTest(unittest.TestCase):

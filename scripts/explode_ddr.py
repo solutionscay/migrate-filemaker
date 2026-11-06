@@ -212,7 +212,8 @@ class Catalog:
             for f in field_definitions(t):
                 self.fields[t.get("id")].add(f.get("id"))
         self.tos = {t.get("name"): t for t in file_el.iterfind("RelationshipGraph/TableList/Table")}
-        self.to_ids = {t.get("id") for t in self.tos.values()}
+        self.to_by_id = {t.get("id"): t for t in self.tos.values()}
+        self.to_ids = set(self.to_by_id)
         self.scripts, self.script_seps = self._items("ScriptCatalog", "Script", "StepList/Step")
         self.layouts, self.layout_seps = self._items("LayoutCatalog", "Layout", ".//Object")
         self.data_sources = {}
@@ -387,6 +388,8 @@ class Renderer:
                 return "external"
             tcat, btid = target
             return None if oid in tcat.fields.get(btid, ()) else "missing"
+        if tag == "FieldReference" and oid not in (None, "0"):
+            return self.field_reference_status(el)
         named_gone = "missing" if MARKER_NAME.fullmatch(name or "") else None
         if oid is None:
             return named_gone
@@ -399,6 +402,8 @@ class Renderer:
         elif tag == "Layout":
             ids, seps = cat.layouts, cat.layout_seps
         elif tag == "Table" and parent is not None and parent.tag != "TableList":
+            ids, seps = cat.to_ids, set()
+        elif tag == "TableOccurrenceReference":
             ids, seps = cat.to_ids, set()
         elif tag == "FileReference":
             ids, seps = set(cat.data_sources), set()
@@ -413,6 +418,19 @@ class Renderer:
         if tag in ("Script", "Layout") and name == "--" and parent is not None and parent.tag != "Step":
             return None  # a privilege set's end-of-folder marker, not an object
         return None if oid in ids else "missing"
+
+    def field_reference_status(self, el):
+        """A field by id on the occurrence named by its child. A deleted occurrence gets its
+        own row on that child, and without it the field cannot be checked."""
+        to_ref = el.find("TableOccurrenceReference")
+        to = self.cat.to_by_id.get(to_ref.get("id")) if to_ref is not None else None
+        if to is None:
+            return None
+        target = self.ex.base_table(self.cat, to.get("name"))
+        if target == "external":
+            return "external"
+        tcat, btid = target
+        return None if el.get("id") in tcat.fields.get(btid, ()) else "missing"
 
     def side_attrs(self, to_name):
         """to=<id> base=<table file> for one side of a relationship."""
