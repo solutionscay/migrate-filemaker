@@ -121,6 +121,14 @@ _IDENT = re.compile(r"[A-Za-z_][\w.]*")
 # FileMaker's text for a deleted target, with the table occurrence when it shows one.
 MARKER_NAME = re.compile(r"<(?:[A-Z][a-z]+ Missing|unknown)>")
 MARKER = re.compile(r"(?:[^\s:()\"<>;,]+::)?" + MARKER_NAME.pattern)
+# What a deleted target of each tag prints as in step text, closest first. A field whose
+# table occurrence is gone prints as <Table Missing>.
+PRINTS_AS = {
+    "Field": ("<Field Missing>", "<Table Missing>"), "FieldReference": ("<Field Missing>",),
+    "Table": ("<Table Missing>",), "TableOccurrenceReference": ("<Table Missing>",),
+    "FileReference": ("<File Missing>",),
+    "Layout": ("<unknown>",), "Script": ("<unknown>",), "ValueList": ("<unknown>",),
+}
 # The parts of a calculation or step text that are not code: strings and comments.
 _NOT_CODE = re.compile(r'''"(?:\\.|[^"\\])*"?|“[^”]*”?|//[^\r\n]*|/\*.*?(?:\*/|\Z)''', re.S)
 
@@ -308,21 +316,31 @@ class Renderer:
     def note_step_markers(self, step, before):
         """A row for each marker in a step's text that no row since `before` explains.
         Step text is how FileMaker prints the step's references and calculations, so it
-        normally repeats them: one reference must not count twice."""
+        normally repeats them: one reference must not count twice. A calculation's marker
+        explains the same marker; an id row explains one only if it is a deletion of the
+        same kind. A `none` row is an empty slot, so it explains nothing."""
         if step.get("id") == "89":
             return  # a comment step's text is the author's words
         raw = (step.findtext("StepText") or "").strip()
         if step.get("enable", "True") != "True" and raw.startswith("//"):
             raw = raw[2:]  # FileMaker's prefix on a disabled step, not a comment
         shown = [m for m, in_comment in text_markers(raw) if not in_comment]
-        by_id = 0
-        for _tag, _id, name, status in self.unresolved[before:]:
-            if status == "marker" and name in shown:
-                shown.remove(name)
-            elif status != "marker":
-                by_id += 1
-        for marker in shown[by_id:]:
-            self.unresolved.append(("StepText", "", marker, "marker"))
+
+        def explain(kinds):
+            for kind in kinds:
+                for marker in shown:
+                    if MARKER_NAME.search(marker).group() == kind:
+                        shown.remove(marker)
+                        return
+
+        rows = self.unresolved[before:]
+        for _tag, _id, name, status in rows:
+            if status == "marker":
+                explain([MARKER_NAME.search(name).group()])
+        for tag, _id, _name, status in rows:
+            if status == "missing":
+                explain(PRINTS_AS.get(tag, ()))
+        self.unresolved += [("StepText", "", marker, "marker") for marker in shown]
 
     def calc(self, el, parent, depth, show_text=True, inactive=False):
         self.seen.add(id(el))

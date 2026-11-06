@@ -269,6 +269,43 @@ MARKERS = """<?xml version="1.0" encoding="UTF-16"?>
         <StepText>Some Step [ &lt;File Missing&gt; ]</StepText>
       </Step>
     </StepList></Script>
+    <Script id="6" name="EmptySlot"><StepList>
+      <Step enable="True" id="76" name="Set Field">
+        <StepText>Set Field [ &lt;Table Missing&gt;; "" ]</StepText>
+        <Field table="" id="0" name=""/>
+      </Step>
+    </StepList></Script>
+    <Script id="8" name="OtherKind"><StepList>
+      <Step enable="True" id="99" name="Some Step">
+        <StepText>Some Step [ Orders::&lt;Field Missing&gt; ]</StepText>
+        <Layout id="55" name=""/>
+      </Step>
+    </StepList></Script>
+    <Script id="10" name="ZeroLayout"><StepList>
+      <Step enable="True" id="6" name="Go to Layout">
+        <StepText>Go to Layout [ &lt;unknown&gt; ]</StepText>
+        <Layout id="0" name=""/>
+      </Step>
+    </StepList></Script>
+    <Script id="11" name="Mixed"><StepList>
+      <Step enable="True" id="99" name="Some Step">
+        <StepText>Some Step [ &lt;unknown&gt;; Orders::&lt;Field Missing&gt;; &lt;File Missing&gt; ]</StepText>
+        <Field table="Orders" id="6" name=""/>
+      </Step>
+    </StepList></Script>
+    <Script id="12" name="GoneOccurrence"><StepList>
+      <Step enable="True" id="76" name="Set Field">
+        <StepText>Set Field [ &lt;Table Missing&gt;; "" ]</StepText>
+        <Field table="GoneTO" id="3" name=""/>
+      </Step>
+    </StepList></Script>
+    <Script id="13" name="CalcAndId"><StepList>
+      <Step enable="True" id="76" name="Set Field">
+        <StepText>Set Field [ Orders::&lt;Field Missing&gt;; &lt;Field Missing&gt; + &lt;Table Missing&gt; ]</StepText>
+        <Field table="Orders" id="6" name=""/>
+        <Calculation>&lt;Field Missing&gt; + &lt;Table Missing&gt;</Calculation>
+      </Step>
+    </StepList></Script>
     <Script id="4" name="NotReferences"><StepList>
       <Step enable="True" id="89" name="# (comment)">
         <StepText># the &lt;Field Missing&gt; text</StepText>
@@ -585,11 +622,38 @@ class TextMarkerTest(unittest.TestCase):
 
     def test_button_step_on_a_layout_follows_the_same_rule(self):
         self.assertEqual(self.rows_of("layouts", "5-"),
-                         [["Layout", "0", "", "none"], ["StepText", "", "<File Missing>", "marker"]])
+                         [["Layout", "0", "", "none"], ["StepText", "", "<unknown>", "marker"],
+                          ["StepText", "", "<File Missing>", "marker"]])
 
     def test_step_text_marker_of_an_id_reference_adds_no_row(self):
         self.assertEqual(self.rows_of("scripts", "1-"),
-                         [["Field", "6", "", "missing"], ["Layout", "0", "", "none"]])
+                         [["Field", "6", "", "missing"], ["Layout", "0", "", "none"],
+                          ["StepText", "", "<unknown>", "marker"]])
+
+    def test_none_row_does_not_absorb_a_marker(self):
+        self.assertEqual(self.rows_of("scripts", "6-"),
+                         [["Field", "0", "", "none"], ["StepText", "", "<Table Missing>", "marker"]])
+        self.assertEqual(self.rows_of("scripts", "10-"),
+                         [["Layout", "0", "", "none"], ["StepText", "", "<unknown>", "marker"]])
+
+    def test_row_of_another_kind_does_not_absorb_a_marker(self):
+        self.assertEqual(self.rows_of("scripts", "8-"),
+                         [["Layout", "55", "", "missing"], ["StepText", "", "Orders::<Field Missing>", "marker"]])
+
+    def test_mixed_step_names_the_marker_left_over(self):
+        self.assertEqual(self.rows_of("scripts", "11-"),
+                         [["Field", "6", "", "missing"],
+                          ["StepText", "", "<unknown>", "marker"],
+                          ["StepText", "", "<File Missing>", "marker"]])
+
+    def test_field_on_a_deleted_occurrence_absorbs_a_table_marker(self):
+        self.assertEqual(self.rows_of("scripts", "12-"), [["Field", "3", "", "missing"]])
+
+    def test_calculation_and_id_rows_each_absorb_their_own_marker(self):
+        self.assertEqual(self.rows_of("scripts", "13-"),
+                         [["Field", "6", "", "missing"],
+                          ["Calculation", "", "<Field Missing>", "marker"],
+                          ["Calculation", "", "<Table Missing>", "marker"]])
 
     def test_step_text_copy_of_a_calculation_marker_adds_no_row(self):
         self.assertEqual(self.rows_of("scripts", "2-"),
@@ -615,7 +679,7 @@ class TextMarkerTest(unittest.TestCase):
         self.assertNotIn("marker-comment", self.legend)
         self.assertIn("Commented-out markers skipped in this run: 2", self.legend)
         self.assertIn("`<File Missing>`", self.legend)
-        self.assertIn("marker 6", self.legend)
+        self.assertIn("marker 15", self.legend)
         self.assertIn("English", self.legend)
 
 
