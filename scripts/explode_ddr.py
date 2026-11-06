@@ -20,7 +20,8 @@ The run checks its own coverage and fails loudly when:
 Output:
     OUT_DIR/<file-slug>/<kind>/<id>-<name>.txt
     OUT_DIR/index.tsv       one row per object: file, kind, id, name, folder, path, sha256, lines
-    OUT_DIR/unresolved.tsv  every reference to an id that is 0, deleted, or outside the DDR set
+    OUT_DIR/unresolved.tsv  every reference to an id that is 0, deleted, or outside the DDR set,
+                            and every FileMaker text marker for a deleted target that no id explains
     OUT_DIR/LEGEND.md       the markers and codes used in the object files
 """
 
@@ -117,6 +118,11 @@ CATALOG_KIND = {
 
 _LINE_BREAK = re.compile("\r\n?|[\n\x0b\x0c\x1c-\x1e\x85\u2028\u2029]")
 _IDENT = re.compile(r"[A-Za-z_][\w.]*")
+# FileMaker's text for a deleted target, with the table occurrence when it shows one.
+MARKER_NAME = re.compile(r"<(?:[A-Z][a-z]+ Missing|unknown)>")
+MARKER = re.compile(r"(?:[^\s:()\"<>;,]+::)?" + MARKER_NAME.pattern)
+# The parts of a calculation or step text that are not code: strings and comments.
+_NOT_CODE = re.compile(r'''"(?:\\.|[^"\\])*"?|“[^”]*”?|//[^\r\n]*|/\*.*?(?:\*/|\Z)''', re.S)
 
 
 SLUG_BYTES = 200  # under the 255-byte name limit, with room for id prefix and hash suffix
@@ -171,6 +177,17 @@ def field_definitions(table):
     """The <Field> definitions of a <BaseTable>. A <Field> nested deeper is a reference
     (a lookup source, a furigana field), not a field of this table."""
     return table.findall("FieldCatalog/Field") or table.findall("Field")
+
+
+def text_markers(text):
+    """(marker, in_comment) for each marker in code or a comment; a string is only data."""
+    found, pos = [], 0
+    for part in _NOT_CODE.finditer(text or ""):
+        found += [(m, False) for m in MARKER.findall(text[pos:part.start()])]
+        if part.group().startswith("/"):
+            found += [(m, True) for m in MARKER.findall(part.group())]
+        pos = part.end()
+    return found + [(m, False) for m in MARKER.findall((text or "")[pos:])]
 
 
 class Catalog:
@@ -278,8 +295,33 @@ class Renderer:
                 out.append(f"{kind}:{one_line(text)}")
         return list(dict.fromkeys(out))
 
+    def note_markers(self, tag, text):
+        """A row for each marker in a calculation. The DDR keeps no id for its target."""
+        for marker, in_comment in text_markers(text):
+            self.unresolved.append((tag, "", marker, "marker-comment" if in_comment else "marker"))
+
+    def note_step_markers(self, step, before):
+        """A row for each marker in a step's text that no row since `before` explains.
+        Step text is how FileMaker prints the step's references and calculations, so it
+        normally repeats them: one reference must not count twice."""
+        if step.get("id") == "89":
+            return  # a comment step's text is the author's words
+        raw = (step.findtext("StepText") or "").strip()
+        if step.get("enable", "True") != "True" and raw.startswith("//"):
+            raw = raw[2:]  # FileMaker's prefix on a disabled step, not a comment
+        shown = [m for m, in_comment in text_markers(raw) if not in_comment]
+        by_id = 0
+        for _tag, _id, name, status in self.unresolved[before:]:
+            if status == "marker" and name in shown:
+                shown.remove(name)
+            elif not status.startswith("marker"):
+                by_id += 1
+        for marker in shown[by_id:]:
+            self.unresolved.append(("StepText", "", marker, "marker"))
+
     def calc(self, el, parent, depth, show_text=True, inactive=False):
         self.seen.add(id(el))
+        self.note_markers("Calculation", el.text)
         self.mark(el, el.attrib, text=True)
         pad = "  " * depth
         display = parent.find("DisplayCalculation") if parent is not None else None
@@ -322,8 +364,9 @@ class Renderer:
                 return "external"
             tcat, btid = target
             return None if oid in tcat.fields.get(btid, ()) else "missing"
+        named_gone = "missing" if MARKER_NAME.fullmatch(name or "") else None
         if oid is None:
-            return None
+            return named_gone
         if oid == "-1" and name == "<Current Table>":
             return None  # Truncate Table and similar steps on the current table
         if tag == "CustomMenuSet" and oid == "0" and not name:
@@ -339,7 +382,7 @@ class Renderer:
         elif tag in cat.ids:
             ids, seps = cat.ids[tag], set()
         else:
-            return None
+            return named_gone  # this tag has no catalog to check; only its name can tell
         if oid == "0":
             return "none"
         if oid in seps:
@@ -503,6 +546,8 @@ class Renderer:
             for d in datas:
                 self.mark(d, text=True)
             label = "".join(d.text or "" for d in datas).strip()
+            # Label text is not code: a marker here is a merge field on a deleted target.
+            self.unresolved += [("Text", "", m, "marker") for m in MARKER.findall(label)]
             attrs = self.attrs(el, parent)
             head = f"{pad}Text" + "".join(f" {k}={_q(v)}" for k, v in attrs.items())
             label_lines = lines_of(label)
@@ -532,6 +577,7 @@ class Renderer:
                 self.seen.add(id(calc))
                 self.mark(calc, calc.attrib, text=True)
                 label = one_line(calc.text or "")
+                self.note_markers("Calculation", calc.text)
             n = list(parent).index(el) + 1
             fa = "".join(f" {k}={_q(v)}" for k, v in el.attrib.items())
             return [f"{pad}Button {n}{fa}: {label}" if label else f"{pad}Button {n}{fa}"]
@@ -540,6 +586,7 @@ class Renderer:
             return [f"{pad}PlatformData" + "".join(f" {k}={_q(v)}" for k, v in el.attrib.items())
                     + f": ({len((el.text or '').strip()) // 2} bytes of printer settings, not shown)"]
         attrs = self.attrs(el, parent)
+        step_start = len(self.unresolved)
         if not defn:
             status = self.ref_status(el, parent)
             if status:
@@ -566,6 +613,8 @@ class Renderer:
         sub = list(pre)
         for c in children:
             sub += self.element(c, depth + 1, calc_text, parent=el, inactive=c.tag in off)
+        if tag == "Step":
+            self.note_step_markers(el, step_start)
         if not attrs and not text and not sub:
             return []  # a wrapper whose content was all presentation or already shown
         head = pad + flag + tag + "".join(f" {k}={_q(v)}" for k, v in attrs.items())
@@ -749,10 +798,12 @@ class Exploder:
             # file references, script/layout ids), each calculation StepText leaves out or
             # truncates, and the refs of every calculation in the step.
             self.r.step_text = norm(raw)
+            step_start = len(self.r.unresolved)
             for c in st:
                 if c.tag == "StepText" or (st.get("id") == "89" and c.tag == "Text"):
                     continue
                 body += [f"{'':>8}{ln}" for ln in self.r.element(c, 0, calc_text=False, parent=st)]
+            self.r.note_step_markers(st, step_start)
             self.r.step_text = ""
         options = " ".join(f"{k}={v}" for k, v in sc.attrib.items() if k not in ("id", "name"))
         extra = [f"steps: {len(steps)} ({disabled} disabled)", f"options: {options}"]
@@ -908,8 +959,8 @@ class Exploder:
             "- In a script, a step option shows only its `refs:` line when the step text already",
             "  shows the calculation; otherwise the full calculation is printed under the option.",
             "- `¶` in a single-line value is a line break in the raw value.",
-            "- `<Field Missing>`, `<Table Missing>`, `<Function Missing>`, `<unknown>` are",
-            "  FileMaker's own markers in the DDR for a deleted target.",
+            "- `<Field Missing>`, `<Table Missing>`, `<File Missing>`, `<Function Missing>`,",
+            "  `<unknown>` are FileMaker's own markers in the DDR for a deleted target. See References.",
             "- `Field: TO::name#id rep=r/max` on a layout field gives the field id from DDRInfo.",
             "  `rep` is printed only for a repeating field.",
             "- `Display:` on a layout field or merge text gives a number, date or time format",
@@ -948,12 +999,31 @@ class Exploder:
             "`unresolved.tsv`:",
             "",
             "- `ref=none`: the id is 0 (nothing selected, or chosen by calculation at run time).",
-            "- `ref=missing`: the id is not in the target catalog (deleted in the source).",
+            "- `ref=missing`: the id is not in the target catalog (deleted in the source), or the",
+            "  reference has no catalog to check and FileMaker names it with a marker.",
             "- `ref=separator`: the id is a `-` separator, which has no object file.",
             "- `ref=external`: the target file is not in this DDR set.",
             "- `in=<file>`: the target is in another file of the set.",
             "- A table occurrence header and each relationship side give `base=` the path of",
             "  the base table file, in whichever file of the set holds it.",
+            "",
+            "`unresolved.tsv` also has a row for each FileMaker text marker that no id explains.",
+            "The DDR keeps no id for these targets, so `id` is empty, and the object file has no",
+            "`ref=` marker: its text shows FileMaker's marker. `name` is the marker, with `TO::`",
+            "when FileMaker shows one. `tag` says where it is: `Calculation`, `StepText`, or `Text`",
+            "(a merge field in layout text).",
+            "",
+            "- `marker`: in calculation code, step text or layout text.",
+            "- `marker-comment`: inside a calculation comment. FileMaker does not run it.",
+            "- A `<Function Missing>` row can also be a plugin that was not installed.",
+            "- A marker in step text gets no row of its own when an id row or a calculation row",
+            "  of the same step explains it. So the number of markers is not the number of rows.",
+            "",
+            "Limit: these rows come from text matching, so `unresolved.tsv` can be incomplete. It",
+            "reads calculations, step text and layout text. It finds only the English marker text",
+            "above (`<... Missing>`, `<unknown>`), so a DDR with other marker text gives no rows.",
+            "It skips strings in a calculation or step text and comment steps. A disabled step or",
+            "an inactive option still gets a row: read the object file to see if it runs.",
             "",
             "Counts in this run: " + (", ".join(f"{k} {v}" for k, v in sorted(statuses.items())) or "none"),
             "",

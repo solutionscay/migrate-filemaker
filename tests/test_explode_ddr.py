@@ -193,6 +193,107 @@ NESTED_FIELD = """<?xml version="1.0" encoding="UTF-16"?>
 """
 
 
+# FileMaker's own markers for a deleted target, in each place they can sit. No client data.
+MARKERS = """<?xml version="1.0" encoding="UTF-16"?>
+<FMPReport type="Report" version="22.0.6">
+<File name="Marks.fmp12" path="host">
+  <BaseTableCatalog>
+    <BaseTable id="1" name="Orders"><FieldCatalog>
+      <Field id="1" dataType="Text" fieldType="Normal" name="code"/>
+    </FieldCatalog></BaseTable>
+  </BaseTableCatalog>
+  <RelationshipGraph>
+    <TableList><Table id="100" baseTableId="1" baseTable="Orders" name="Orders"/></TableList>
+    <RelationshipList/>
+  </RelationshipGraph>
+  <LayoutCatalog>
+    <Layout id="1" name="Live">
+      <Object type="Field" key="1" flags="0">
+        <ConditionalFormatting><Item><Condition>
+          <Calculation>Check ( Orders::&lt;Field Missing&gt; )</Calculation>
+          <DisplayCalculation><Chunk type="NoRef">Check ( Orders::&lt;Field Missing&gt; )</Chunk></DisplayCalculation>
+        </Condition></Item></ConditionalFormatting>
+      </Object>
+    </Layout>
+    <Layout id="2" name="Commented">
+      <Object type="Field" key="1" flags="0">
+        <ConditionalFormatting><Item><Condition>
+          <Calculation>/*Check ( Orders::&lt;Field Missing&gt; )*/ 1 // &lt;Table Missing&gt;</Calculation>
+        </Condition></Item></ConditionalFormatting>
+      </Object>
+    </Layout>
+    <Layout id="3" name="Literal">
+      <Object type="Field" key="1" flags="0">
+        <ConditionalFormatting><Item><Condition>
+          <Calculation>"say \\" &lt;unknown&gt; \\" // &lt;Field Missing&gt;" = "&lt;Field Missing&gt;"</Calculation>
+        </Condition></Item></ConditionalFormatting>
+      </Object>
+    </Layout>
+    <Layout id="5" name="Button">
+      <Object type="Button" key="1" flags="0">
+        <ButtonObj buttonFlags="0">
+          <Step enable="True" id="6" name="Go to Layout"><StepText>Go to Layout [ &lt;unknown&gt; ]</StepText><Layout id="0" name=""/></Step>
+          <Step enable="True" id="99" name="Some Step"><StepText>Some Step [ &lt;File Missing&gt; ]</StepText></Step>
+        </ButtonObj>
+      </Object>
+    </Layout>
+    <Layout id="4" name="Merge">
+      <Object type="Text" key="1" flags="0">
+        <TextObj flags="0">
+          <ParagraphStyleVector><Style><Data>&lt;&lt;Orders::&lt;Field Missing&gt;&gt;&gt;</Data></Style></ParagraphStyleVector>
+          <CharacterStyleVector><Style><Data>&lt;&lt;Orders::&lt;Field Missing&gt;&gt;&gt;</Data></Style></CharacterStyleVector>
+        </TextObj>
+      </Object>
+    </Layout>
+  </LayoutCatalog>
+  <ScriptCatalog>
+    <Script id="1" name="ById"><StepList>
+      <Step enable="True" id="76" name="Set Field">
+        <StepText>Set Field [ Orders::&lt;Field Missing&gt; ]</StepText>
+        <Field table="Orders" id="6" name=""/>
+      </Step>
+      <Step enable="False" id="6" name="Go to Layout">
+        <StepText>// Go to Layout [ &lt;unknown&gt; ]</StepText>
+        <Layout id="0" name=""/>
+      </Step>
+    </StepList></Script>
+    <Script id="2" name="InCalc"><StepList>
+      <Step enable="True" id="141" name="Set Variable">
+        <StepText>Set Variable [ $x; Value: &lt;Function Missing&gt; ( 1 ) ]</StepText>
+        <Value><Calculation>&lt;Function Missing&gt; ( 1 )</Calculation></Value>
+        <Name>$x</Name>
+      </Step>
+    </StepList></Script>
+    <Script id="3" name="TextOnly"><StepList>
+      <Step enable="True" id="99" name="Some Step">
+        <StepText>Some Step [ &lt;File Missing&gt; ]</StepText>
+      </Step>
+    </StepList></Script>
+    <Script id="4" name="NotReferences"><StepList>
+      <Step enable="True" id="89" name="# (comment)">
+        <StepText># the &lt;Field Missing&gt; text</StepText>
+        <Text># the &lt;Field Missing&gt; text</Text>
+      </Step>
+      <Step enable="True" id="61" name="Insert Text">
+        <StepText>Insert Text [ "payload" ]</StepText>
+        <Text>&lt;Field Missing&gt; as plain data</Text>
+      </Step>
+    </StepList></Script>
+    <Script id="5" name="ByName"><StepList>
+      <Step enable="True" id="99" name="Some Step">
+        <StepText>Some Step</StepText>
+        <FieldReference><TableOccurrenceReference id="-1" name="&lt;Table Missing&gt;"/></FieldReference>
+      </Step>
+    </StepList></Script>
+  </ScriptCatalog>
+  <CustomFunctionCatalog>
+    <CustomFunction id="7" name="Fn"><Calculation>&lt;Table Missing&gt;::x</Calculation></CustomFunction>
+  </CustomFunctionCatalog>
+</File>
+</FMPReport>
+"""
+
+
 def explode(paths, out):
     ex = explode_ddr.Exploder(out)
     with contextlib.redirect_stdout(io.StringIO()):
@@ -420,6 +521,86 @@ class NestedDefinitionTest(unittest.TestCase):
                 fh.write(doc)
             ex, _ = explode([raw], os.path.join(tmp, "out"))
             self.assertEqual(sorted(r[2] for r in ex.rows if r[1] == "tables"), ["1", "2", "3"])
+
+
+class TextMarkerTest(unittest.TestCase):
+    """A marker no id accounts for gets a row, once, and text that only looks like one gets none."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        raw = os.path.join(cls.tmp.name, "Marks.xml")
+        with open(raw, "w", encoding="utf-16") as fh:
+            fh.write(MARKERS)
+        cls.out = os.path.join(cls.tmp.name, "out")
+        cls.ex, cls.results = explode([raw], cls.out)
+        with open(os.path.join(cls.out, "unresolved.tsv"), encoding="utf-8") as fh:
+            cls.rows = [line.split("\t") for line in fh.read().splitlines()[1:]]
+        with open(os.path.join(cls.out, "LEGEND.md"), encoding="utf-8") as fh:
+            cls.legend = fh.read()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def rows_of(self, kind, prefix):
+        where = os.path.join("Marks.fmp12", kind, prefix)
+        return [r[1:] for r in self.rows if r[0].startswith(where)]
+
+    def test_gates_pass(self):
+        for _src, raw, shown, uncovered in self.results:
+            self.assertEqual(raw, shown)
+            self.assertEqual(uncovered, [])
+
+    def test_live_calculation_marker_has_a_row_with_no_id(self):
+        self.assertEqual(self.rows_of("layouts", "1-"),
+                         [["Calculation", "", "Orders::<Field Missing>", "marker"]])
+
+    def test_commented_marker_has_its_own_status(self):
+        self.assertEqual(self.rows_of("layouts", "2-"),
+                         [["Calculation", "", "Orders::<Field Missing>", "marker-comment"],
+                          ["Calculation", "", "<Table Missing>", "marker-comment"]])
+
+    def test_string_literal_is_not_a_marker(self):
+        self.assertEqual(self.rows_of("layouts", "3-"), [])
+
+    def test_merge_field_in_layout_text_has_one_row(self):
+        self.assertEqual(self.rows_of("layouts", "4-"),
+                         [["Text", "", "Orders::<Field Missing>", "marker"]])
+
+    def test_button_step_on_a_layout_follows_the_same_rule(self):
+        self.assertEqual(self.rows_of("layouts", "5-"),
+                         [["Layout", "0", "", "none"], ["StepText", "", "<File Missing>", "marker"]])
+
+    def test_step_text_marker_of_an_id_reference_adds_no_row(self):
+        self.assertEqual(self.rows_of("scripts", "1-"),
+                         [["Field", "6", "", "missing"], ["Layout", "0", "", "none"]])
+
+    def test_step_text_copy_of_a_calculation_marker_adds_no_row(self):
+        self.assertEqual(self.rows_of("scripts", "2-"),
+                         [["Calculation", "", "<Function Missing>", "marker"]])
+
+    def test_step_text_marker_alone_has_a_row(self):
+        self.assertEqual(self.rows_of("scripts", "3-"), [["StepText", "", "<File Missing>", "marker"]])
+
+    def test_comment_step_and_text_payload_are_not_markers(self):
+        self.assertEqual(self.rows_of("scripts", "4-"), [])
+
+    def test_marker_as_a_reference_name_is_missing(self):
+        self.assertEqual(self.rows_of("scripts", "5-"),
+                         [["TableOccurrenceReference", "-1", "<Table Missing>", "missing"]])
+        self.assertIn("ref=missing", read_all(self.out)[os.path.join("Marks.fmp12", "scripts", "5-ByName.txt")])
+
+    def test_custom_function_marker_has_a_row(self):
+        self.assertEqual(self.rows_of("custom-functions", "7-"),
+                         [["Calculation", "", "<Table Missing>", "marker"]])
+
+    def test_legend_explains_the_statuses_and_the_limit(self):
+        self.assertIn("`marker`:", self.legend)
+        self.assertIn("`marker-comment`:", self.legend)
+        self.assertIn("`<File Missing>`", self.legend)
+        self.assertIn("marker 6", self.legend)
+        self.assertIn("English", self.legend)
 
 
 class JapaneseNameTest(unittest.TestCase):
