@@ -453,6 +453,18 @@ class CliTest(unittest.TestCase):
             self.assertEqual(sorted(f for f in os.listdir(out) if not os.path.isdir(os.path.join(out, f))),
                              ["LEGEND.md", "index.tsv", "unresolved.tsv"])
             self.assertIn("s3cretPa55", "\n".join(read_all(out).values()))
+            self.assertIn("markers in commented-out code, skipped: 0", run.stdout)
+
+    def test_run_prints_how_many_commented_markers_it_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = os.path.join(tmp, "raw")
+            os.makedirs(raw)
+            with open(os.path.join(raw, "Marks.xml"), "w", encoding="utf-16") as fh:
+                fh.write(MARKERS)
+            run = subprocess.run([sys.executable, os.path.join(HERE, "..", "scripts", "explode_ddr.py"),
+                                  raw, os.path.join(tmp, "out")], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertIn("markers in commented-out code, skipped: 2", run.stdout)
 
 
 class SeparatorCodeTest(unittest.TestCase):
@@ -556,10 +568,13 @@ class TextMarkerTest(unittest.TestCase):
         self.assertEqual(self.rows_of("layouts", "1-"),
                          [["Calculation", "", "Orders::<Field Missing>", "marker"]])
 
-    def test_commented_marker_has_its_own_status(self):
-        self.assertEqual(self.rows_of("layouts", "2-"),
-                         [["Calculation", "", "Orders::<Field Missing>", "marker-comment"],
-                          ["Calculation", "", "<Table Missing>", "marker-comment"]])
+    def test_commented_out_marker_has_no_row_and_is_counted(self):
+        self.assertEqual(self.rows_of("layouts", "2-"), [])
+        self.assertEqual(self.ex.r.comment_markers, 2)
+
+    def test_commented_out_marker_stays_in_the_object_file(self):
+        layout = read_all(self.out)[os.path.join("Marks.fmp12", "layouts", "2-Commented.txt")]
+        self.assertIn("/*Check ( Orders::<Field Missing> )*/ 1 // <Table Missing>", layout)
 
     def test_string_literal_is_not_a_marker(self):
         self.assertEqual(self.rows_of("layouts", "3-"), [])
@@ -597,7 +612,8 @@ class TextMarkerTest(unittest.TestCase):
 
     def test_legend_explains_the_statuses_and_the_limit(self):
         self.assertIn("`marker`:", self.legend)
-        self.assertIn("`marker-comment`:", self.legend)
+        self.assertNotIn("marker-comment", self.legend)
+        self.assertIn("Commented-out markers skipped in this run: 2", self.legend)
         self.assertIn("`<File Missing>`", self.legend)
         self.assertIn("marker 6", self.legend)
         self.assertIn("English", self.legend)

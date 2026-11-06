@@ -257,6 +257,7 @@ class Renderer:
         self.codes = defaultdict(Counter)
         self.step_text = ""     # normalized StepText of the step being rendered
         self.unresolved = []    # (tag, id, name, status) for the object being rendered
+        self.comment_markers = 0  # markers in commented-out code: no row, counted in the run
 
     @property
     def calcs(self):
@@ -296,9 +297,13 @@ class Renderer:
         return list(dict.fromkeys(out))
 
     def note_markers(self, tag, text):
-        """A row for each marker in a calculation. The DDR keeps no id for its target."""
+        """A row for each marker in a calculation's live code. The DDR keeps no id for its
+        target. Commented-out code is not a reference: it is counted, not listed."""
         for marker, in_comment in text_markers(text):
-            self.unresolved.append((tag, "", marker, "marker-comment" if in_comment else "marker"))
+            if in_comment:
+                self.comment_markers += 1
+            else:
+                self.unresolved.append((tag, "", marker, "marker"))
 
     def note_step_markers(self, step, before):
         """A row for each marker in a step's text that no row since `before` explains.
@@ -314,7 +319,7 @@ class Renderer:
         for _tag, _id, name, status in self.unresolved[before:]:
             if status == "marker" and name in shown:
                 shown.remove(name)
-            elif not status.startswith("marker"):
+            elif status != "marker":
                 by_id += 1
         for marker in shown[by_id:]:
             self.unresolved.append(("StepText", "", marker, "marker"))
@@ -1014,7 +1019,8 @@ class Exploder:
             "(a merge field in layout text).",
             "",
             "- `marker`: in calculation code, step text or layout text.",
-            "- `marker-comment`: inside a calculation comment. FileMaker does not run it.",
+            "- A marker in commented-out code (`/* */` or `//`) has no row: it is not a reference.",
+            "  The object file still shows the calculation as written.",
             "- A `<Function Missing>` row can also be a plugin that was not installed.",
             "- A marker in step text gets no row of its own when an id row or a calculation row",
             "  of the same step explains it. So the number of markers is not the number of rows.",
@@ -1026,6 +1032,7 @@ class Exploder:
             "an inactive option still gets a row: read the object file to see if it runs.",
             "",
             "Counts in this run: " + (", ".join(f"{k} {v}" for k, v in sorted(statuses.items())) or "none"),
+            f"Commented-out markers skipped in this run: {self.r.comment_markers}",
             "",
             "## Relationship options",
             "",
@@ -1116,6 +1123,7 @@ def main():
     statuses = Counter(r[-1] for r in ex.unresolved)
     print(f"  unresolved references: {len(ex.unresolved)} "
           f"({', '.join(f'{k} {v}' for k, v in sorted(statuses.items())) or 'none'})")
+    print(f"  markers in commented-out code, skipped: {ex.r.comment_markers}")
     print(f"Wrote {len(ex.rows)} object files, index.tsv, unresolved.tsv and LEGEND.md to {out}")
     sys.exit(1 if failed else 0)
 
