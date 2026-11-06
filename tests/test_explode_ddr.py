@@ -732,12 +732,12 @@ class TextMarkerTest(unittest.TestCase):
                          [["Calculation", "", "<Table Missing>", "marker"]])
 
     def test_legend_explains_the_statuses_and_the_limit(self):
-        self.assertIn("`marker`:", self.legend)
+        self.assertIn("Its status is `marker`.", self.legend)
         self.assertNotIn("marker-comment", self.legend)
         self.assertIn("Commented-out markers skipped in this run: 2", self.legend)
         self.assertIn("`<File Missing>`", self.legend)
         self.assertIn("marker 15", self.legend)
-        self.assertIn("English", self.legend)
+        self.assertIn("marker text in other languages", self.legend)
 
 
 class ChecksBase(unittest.TestCase):
@@ -813,6 +813,52 @@ class MarkerWithNoRowTest(ChecksBase):
                     listed = sum(1 for r in rows if r[0] == rel and r[4] != "marker")
                     self.assertEqual(printed, listed, rel)
                 self.assertNotIn("None", {r[2] for r in rows})
+
+
+class UnresolvedDocsTest(unittest.TestCase):
+    """The docs and the generated legend say what unresolved.tsv now holds, and its limits."""
+
+    @classmethod
+    def setUpClass(cls):
+        def doc(name):
+            with open(os.path.join(HERE, "..", name), encoding="utf-8") as fh:
+                return fh.read()
+        cls.skill, cls.readme, cls.readme_ja = doc("SKILL.md"), doc("README.md"), doc("README.ja.md")
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = os.path.join(tmp, "Marks.xml")
+            with open(raw, "w", encoding="utf-16") as fh:
+                fh.write(MARKERS)
+            explode([raw], os.path.join(tmp, "out"))
+            with open(os.path.join(tmp, "out", "LEGEND.md"), encoding="utf-8") as fh:
+                cls.legend = fh.read()
+
+    def test_skill_and_legend_name_every_checked_tag(self):
+        for tag in ("Field", "FieldReference", "TableOccurrenceReference", "Table", "BaseTable", "LeftTable",
+                    "RightTable", "DataSourceRef", "Script", "Layout", "ValueList", "FileReference",
+                    "CustomMenu", "CustomMenuSet", "PrivilegeSet"):
+            self.assertIn(f"`{tag}`", self.skill)
+            self.assertIn(f"`{tag}`", self.legend)
+
+    def test_docs_state_the_marker_forms_and_the_limit(self):
+        for text in (self.skill, self.legend):
+            self.assertIn("one capitalized word", text)
+            self.assertIn("`<Value List Missing>`", text)
+            self.assertIn("not proof", text)
+            self.assertIn("ommented-out code", text)
+
+    def test_legend_says_which_row_explains_a_step_marker(self):
+        self.assertIn("same kind", self.legend)
+        self.assertIn("`ref=none` or `ref=external` row explains nothing", self.legend)
+
+    def test_readmes_mention_markers_and_the_exclusion(self):
+        self.assertIn("`<Field Missing>`", self.readme)
+        self.assertIn("commented-out code", self.readme)
+        self.assertIn("`<Field Missing>`", self.readme_ja)
+        self.assertIn("コメントアウト", self.readme_ja)
+
+    def test_no_doc_names_the_removed_status(self):
+        for text in (self.skill, self.readme, self.readme_ja, self.legend):
+            self.assertNotIn("marker-comment", text)
 
 
 class JapaneseNameTest(unittest.TestCase):

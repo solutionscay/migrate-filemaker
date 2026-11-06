@@ -35,7 +35,7 @@ Clone the repo into your agent's skills folder. Then ask for `$migrate-filemaker
 
 ## How it works
 
-1. Extract. `explode_ddr.py` writes one text file per object, an `index.tsv` of all of them, a `LEGEND.md` for the codes, and an `unresolved.tsv` of references to deleted or missing targets. It stops if any calculation or attribute check fails.
+1. Extract. `explode_ddr.py` writes one text file per object, an `index.tsv` of all of them, a `LEGEND.md` for the codes, and an `unresolved.tsv` of references to deleted or missing targets, including FileMaker's own text markers such as `<Field Missing>`. It leaves out commented-out code, and its text matching is not proof that nothing else is missing. It stops if any calculation or attribute check fails.
 2. Inventory. Count what is there and how the files connect.
 3. Read every object. Nine explorers (scripts, tables, layouts, graph, security, value lists, menus, custom functions, file settings) each read their kind and write one CSV row per object. `catalog_contract.py verify` proves nothing was skipped.
 4. Ask. List what the DDR cannot answer: goals, users, identity, integrations, which behaviors to keep.
