@@ -2,6 +2,7 @@ import contextlib
 import glob
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -776,6 +777,42 @@ class ReferenceTagCheckTest(ChecksBase):
         self.assertEqual(self.rows_of("scripts", "3-"), [["TableOccurrenceReference", "555", "GoneTO", "missing"]])
         text = self.files[os.path.join("Checks.fmp12", "scripts", "3-GoneOccurrence.txt")]
         self.assertIn("TableOccurrenceReference id=555 name=GoneTO ref=missing", text)
+
+
+class MarkerWithNoRowTest(ChecksBase):
+    """Every printed ref= marker has a row, in the same file."""
+
+    def test_relationship_side_naming_a_missing_occurrence_has_a_row(self):
+        row = ["RightTable", "", "GoneTO", "missing"]
+        self.assertEqual(self.rows_of("relationships", "5-"), [row])
+        self.assertEqual(self.rows_of("table-occurrences", "100-"), [row])  # the copy under Orders
+        text = self.files[os.path.join("Checks.fmp12", "relationships", "5-Orders_GoneTO.txt")]
+        self.assertIn("RightTable name=GoneTO ref=missing", text)
+
+    def test_occurrence_with_a_missing_base_table_has_a_row(self):
+        self.assertEqual(self.rows_of("table-occurrences", "101-"), [["BaseTable", "77", "GoneBase", "missing"]])
+        text = self.files[os.path.join("Checks.fmp12", "table-occurrences", "101-NoBase.txt")]
+        self.assertIn("# base table: missing ref=missing", text)
+
+    def test_table_on_a_missing_data_source_has_a_row(self):
+        self.assertEqual(self.rows_of("tables", "2-"), [["DataSourceRef", "", "GoneSource", "missing"]])
+        self.assertIn("ref=missing", self.files[os.path.join("Checks.fmp12", "tables", "2-Linked.txt")])
+
+    def test_ref_markers_and_id_rows_match_one_to_one_in_every_file(self):
+        for raw in (CHECKS, MARKERS, GAPS, NESTED_FIELD):
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "Raw.xml")
+                with open(path, "w", encoding="utf-16") as fh:
+                    fh.write(raw)
+                out = os.path.join(tmp, "out")
+                explode([path], out)
+                with open(os.path.join(out, "unresolved.tsv"), encoding="utf-8") as fh:
+                    rows = [line.split("\t") for line in fh.read().splitlines()[1:]]
+                for rel, text in read_all(out).items():
+                    printed = len(re.findall(r"\bref=(?:none|missing|separator|external)\b", text))
+                    listed = sum(1 for r in rows if r[0] == rel and r[4] != "marker")
+                    self.assertEqual(printed, listed, rel)
+                self.assertNotIn("None", {r[2] for r in rows})
 
 
 class JapaneseNameTest(unittest.TestCase):

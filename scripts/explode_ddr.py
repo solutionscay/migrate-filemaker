@@ -370,6 +370,8 @@ class Renderer:
         """None when the reference resolves; else none / missing / separator / external."""
         tag, oid, name = el.tag, el.get("id"), el.get("name")
         cat = self.cat
+        if tag in ("LeftTable", "RightTable"):
+            return "missing" if name is not None and name not in cat.tos else None
         if tag in ("Script", "Layout", "ValueList") and parent is not None:
             fr = parent.find("FileReference")
             if fr is not None:
@@ -436,7 +438,7 @@ class Renderer:
         """to=<id> base=<table file> for one side of a relationship."""
         to = self.cat.tos.get(to_name)
         if to is None:
-            return {"ref": "missing"}
+            return {}  # ref_status marks it
         return {"to": to.get("id"), "base": self.ex.base_label(self.cat, to_name)}
 
     # ── element rendering ────────────────────────────────────────────────────
@@ -566,7 +568,7 @@ class Renderer:
     def ref_suffix(self, el, parent):
         status = self.ref_status(el, parent)
         if status:
-            self.unresolved.append((el.tag, el.get("id"), el.get("name") or "", status))
+            self.unresolved.append((el.tag, el.get("id") or "", el.get("name") or "", status))
             return f" ref={status}"
         return ""
 
@@ -632,7 +634,7 @@ class Renderer:
             status = self.ref_status(el, parent)
             if status:
                 attrs["ref"] = status
-                self.unresolved.append((tag, el.get("id"), el.get("name") or "", status))
+                self.unresolved.append((tag, el.get("id") or "", el.get("name") or "", status))
             elif tag in ("Script", "Layout", "ValueList") and parent is not None \
                     and parent.find("FileReference") is not None:
                 tcat = self.ex.data_source_file(self.cat, parent.find("FileReference").get("id"))
@@ -755,6 +757,8 @@ class Exploder:
                 ds = next((d for d in self.r.cat.data_sources.values() if d.get("name") == ref.get("name")), None)
                 where = f"{self.r.cat.slug}/data-sources/{ds.get('id')}-{slug(ds.get('name'))}.txt" if ds is not None \
                     else "ref=missing"
+                if ds is None:
+                    self.r.unresolved.append(("DataSourceRef", "", ref.get("name") or "", "missing"))
                 extra.append(f"external: data source {ref.get('name')} ({where}) "
                              f"table {ref.get('catalogName')}.{ref.get('schemaName')}.{ref.get('tableName')}")
             body = []
@@ -785,9 +789,13 @@ class Exploder:
             body += ["", f"relationships: {len(mine)}"]
             for rel in mine:
                 body += [""] + self.r.element(rel, defn=True)
+            base = self.base_label(self.r.cat, to.get("name"))
+            if base == "missing":
+                self.r.unresolved.append(("BaseTable", to.get("baseTableId") or "", to.get("baseTable") or "", "missing"))
+                base = "missing ref=missing"
             self.write(src, "table-occurrences", to.get("id"), to.get("name"), "",
                        f"RelationshipGraph/TableList/Table[@id={to.get('id')}]",
-                       [f"base table: {self.base_label(self.r.cat, to.get('name'))}"], body)
+                       [f"base table: {base}"], body)
         # Relationships are also written once each, so a relationship is never only a copy.
         for rel in rels:
             l, r = rel.find("LeftTable"), rel.find("RightTable")
