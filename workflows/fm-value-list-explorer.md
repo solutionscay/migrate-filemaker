@@ -12,7 +12,7 @@ python3 "$SKILL_DIR/scripts/catalog_contract.py" snapshot \
 - `Source value=`: `Custom` (the values follow under `CustomValues`), `Field` (values come from `PrimaryField` and an optional `SecondaryField` for display), or `External` (a list in another file).
 - `ShowRelated` and its table occurrence: the list shows only related records.
 - Sort and show options on each field.
-- Where it is used: grep the markers, not the bare name: `ValueList: <name>#<id>` on layout fields, `ValueList id=<id> name=` in field validation and script steps, and `ValueListItems` calculations that quote the name.
+- Where it is used: grep the markers, not the bare name: `ValueList: <name>#<id>` on layout fields, `ValueList id=<id> name=` in field validation and script steps, and `ValueListItems` calculations that quote the name. A line that starts `(inactive) ValueList id=` is a validation with `valuelist=False`: the field keeps the list but FileMaker does not check it. It is not a use.
 
 ## Record
 

@@ -482,13 +482,15 @@ class Renderer:
         return attrs
 
     def inactive_children(self, el):
-        """Tags of the children of a field option that hold a setting while the option is off."""
+        """Tags of the children of a field option that hold a setting while the option is off.
+        A setting can be sub-elements, text or only attributes (<ValueList id= name=/>)."""
         if el.tag not in FIELD_OPTION_TAGS:
             return set()
         off = set()
         for k, v in el.attrib.items():
             child = el.find(INACTIVE_CHILD.get(k, "-"))
-            if v == "False" and child is not None and (len(child) or (child.text or "").strip()):
+            if v == "False" and child is not None \
+                    and (len(child) or (child.text or "").strip() or child.attrib):
                 off.add(child.tag)
         if el.get("constant") == "True":
             off.discard("Calculation")  # the DDR mirrors a constant as a Calculation
@@ -1002,7 +1004,9 @@ class Exploder:
             "- An option that is not printed has its default value: False for a field option,",
             "  0 for `flags` and `rotation`.",
             "- `(inactive)` marks a setting the DDR keeps while its option is off, for example an",
-            "  auto-enter calculation with `calculation=False`. FileMaker does not run it.",
+            "  auto-enter calculation with `calculation=False`, or a validation value list with",
+            "  `valuelist=False`. FileMaker does not run or check it. The option flag shows `False`",
+            "  beside it.",
             "- `refs:` lists the fields (`TO::field#id`), custom functions (`cf:`) and functions",
             "  (`fn:`) a calculation uses.",
             "- In a script, a step option shows only its `refs:` line when the step text already",

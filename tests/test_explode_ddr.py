@@ -861,6 +861,104 @@ class UnresolvedDocsTest(unittest.TestCase):
             self.assertNotIn("marker-comment", text)
 
 
+# A switched-off option whose child holds only attributes: the DDR keeps the setting.
+OFF_OPTIONS = """<?xml version="1.0" encoding="UTF-16"?>
+<FMPReport type="Report" version="22.0.6">
+<File name="Options.fmp12" path="host">
+  <BaseTableCatalog>
+    <BaseTable id="1" name="People"><FieldCatalog>
+      <Field id="1" dataType="Text" fieldType="Normal" name="offList">
+        <Validation valuelist="False" maxLength="False" type="Always">
+          <ValueList id="7" name="Sizes"/>
+        </Validation>
+      </Field>
+      <Field id="2" dataType="Text" fieldType="Normal" name="onList">
+        <Validation valuelist="True" maxLength="False" type="Always">
+          <ValueList id="7" name="Sizes"/>
+        </Validation>
+      </Field>
+      <Field id="3" dataType="Text" fieldType="Normal" name="offLength">
+        <Validation valuelist="False" maxLength="False" type="Always">
+          <MaxDataLength value="10"/>
+        </Validation>
+      </Field>
+      <Field id="4" dataType="Text" fieldType="Normal" name="onLength">
+        <Validation valuelist="False" maxLength="True" type="Always">
+          <MaxDataLength value="20"/>
+        </Validation>
+      </Field>
+    </FieldCatalog></BaseTable>
+  </BaseTableCatalog>
+  <RelationshipGraph>
+    <TableList><Table id="100" baseTableId="1" baseTable="People" name="People"/></TableList>
+    <RelationshipList/>
+  </RelationshipGraph>
+  <ValueListCatalog>
+    <ValueList id="7" name="Sizes"><Source value="Custom"/></ValueList>
+  </ValueListCatalog>
+</File>
+</FMPReport>
+"""
+
+
+class InactiveAttributeChildTest(unittest.TestCase):
+    """A child that holds only attributes is inactive when its option flag is False."""
+
+    ids = {"offList": 1, "onList": 2, "offLength": 3, "onLength": 4}
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        raw = os.path.join(cls.tmp.name, "Options.xml")
+        with open(raw, "w", encoding="utf-16") as fh:
+            fh.write(OFF_OPTIONS)
+        cls.ex, cls.results = explode([raw], os.path.join(cls.tmp.name, "out"))
+        cls.table = read_all(os.path.join(cls.tmp.name, "out"))[
+            os.path.join("Options.fmp12", "tables", "1-People.txt")]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def field(self, name):
+        """The lines of one field's block in the table file."""
+        lines = self.table.splitlines()
+        start = lines.index(f"Field id={self.ids[name]} dataType=Text fieldType=Normal name={name}")
+        block = [lines[start]]
+        for ln in lines[start + 1:]:
+            if ln.startswith("  "):
+                block.append(ln)
+            else:
+                break
+        return "\n".join(block)
+
+    def test_switched_off_value_list_is_inactive(self):
+        block = self.field("offList")
+        self.assertIn("valuelist=False", block)
+        self.assertIn("(inactive) ValueList id=7 name=Sizes", block)
+
+    def test_switched_on_value_list_is_not_marked(self):
+        block = self.field("onList")
+        self.assertIn("valuelist=True", block)
+        self.assertNotIn("(inactive)", block)
+        self.assertIn("ValueList id=7 name=Sizes", block)
+
+    def test_switched_off_max_length_is_inactive(self):
+        block = self.field("offLength")
+        self.assertIn("maxLength=False", block)
+        self.assertIn("(inactive) MaxDataLength value=10", block)
+
+    def test_switched_on_max_length_is_not_marked(self):
+        block = self.field("onLength")
+        self.assertIn("maxLength=True", block)
+        self.assertNotIn("(inactive)", block)
+
+    def test_value_list_grep_counts_only_the_active_use(self):
+        active = [ln for ln in self.table.splitlines()
+                  if "ValueList id=7 name=" in ln and "(inactive)" not in ln]
+        self.assertEqual(len(active), 1)
+
+
 class JapaneseNameTest(unittest.TestCase):
     """Japanese names keep their letters in paths, and two file names never share a folder."""
 
