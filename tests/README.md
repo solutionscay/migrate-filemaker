@@ -10,6 +10,9 @@ Stdlib only. `parse_ddr.py` has no dependencies and must keep none.
 - `fixtures/two_file/` — two tiny DDRs (`UI.xml` calls scripts in `Backend.xml`
   from a script step and from buttons) for cross-file script calls, plus value
   lists on an external TO and synthetic `External` sources.
+- `fixtures/relationship_options.xml` — three made-up relationships: options on
+  `LeftTable`/`RightTable` (sorted, unsorted with a stale `Sort`) and the old
+  `LeftOptions`/`RightOptions` fallback.
 - `test_parse_ddr.py` — runs the real parser over it and asserts the output exactly.
 - `test_explode_ddr.py` — explodes the fixture and checks that every calculation
   lands in an object file and that the index lists every file.

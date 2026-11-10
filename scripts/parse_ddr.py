@@ -585,6 +585,47 @@ class DDRFile:
 
     # ─── RELATIONSHIPS ──────────────────────────────────────────────────
 
+    @staticmethod
+    def _relationship_side_options(rel, side):
+        """Options for one side of a relationship.
+
+        FileMaker writes them on the table side:
+        <LeftTable cascadeCreate=".." cascadeDelete=".." name=".."><SortList
+        Maintain=".." value=".."><Sort type=".."><PrimaryField><Field/>...
+        SortList value="False" means the side is not sorted, even when a
+        stale Sort is still inside it. The older <LeftOptions deleteRelated
+        createRelated> form is read only when the table side has no flags.
+        """
+        opts = {}
+        table_el = rel.find(f"{side}Table")
+        legacy_el = rel.find(f"{side}Options")
+        if table_el is not None and (table_el.get("cascadeCreate") is not None
+                                     or table_el.get("cascadeDelete") is not None):
+            src, create_attr, delete_attr = table_el, "cascadeCreate", "cascadeDelete"
+        elif legacy_el is not None:
+            src, create_attr, delete_attr = legacy_el, "createRelated", "deleteRelated"
+        else:
+            return opts
+        if src.get(delete_attr) == "True":
+            opts["delete_related"] = True
+        if src.get(create_attr) == "True":
+            opts["allow_create"] = True
+        sort = src.find("SortList")
+        if sort is not None and sort.get("value", "True") == "True":
+            sort_fields = []
+            for sf in sort.findall("Sort"):
+                field = sf.find("PrimaryField/Field")
+                if field is None:
+                    field = sf.find("Field")
+                if field is not None:
+                    sort_fields.append({
+                        "field": field.get("name"),
+                        "order": sf.get("type", "Ascending"),
+                    })
+            if sort_fields:
+                opts["sort"] = sort_fields
+        return opts
+
     def _parse_relationships(self):
         print("  Parsing relationships...")
         graph = self.file_el.find("RelationshipGraph")
@@ -626,27 +667,9 @@ class DDRFile:
                 r["predicates"] = predicates
 
             for side in ["Left", "Right"]:
-                opts_el = rel.find(f"{side}Options")
-                if opts_el is not None:
-                    opts = {}
-                    if opts_el.get("deleteRelated") == "True":
-                        opts["delete_related"] = True
-                    if opts_el.get("createRelated") == "True":
-                        opts["allow_create"] = True
-                    sort = opts_el.find("SortList")
-                    if sort is not None and len(list(sort)):
-                        sort_fields = []
-                        for sf in sort.findall("Sort"):
-                            field = sf.find("Field")
-                            if field is not None:
-                                sort_fields.append({
-                                    "field": field.get("name"),
-                                    "order": sf.get("type", "Ascending"),
-                                })
-                        if sort_fields:
-                            opts["sort"] = sort_fields
-                    if opts:
-                        r[f"{side.lower()}_options"] = opts
+                opts = self._relationship_side_options(rel, side)
+                if opts:
+                    r[f"{side.lower()}_options"] = opts
 
             self._inject_source(r)
             relationships.append(r)
