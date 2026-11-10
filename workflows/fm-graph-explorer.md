@@ -35,7 +35,7 @@ source_id,source_hash,kind,file,id,name,predicates,cascade_create,cascade_delete
 
 - `predicates`: one line per `JoinPredicate`, in order: `LeftTO::field#id <type> RightTO::field#id`. Put a TO name that contains a space in double quotes (`"Defense Attorney"::ID#1`).
 - `cascade_create`, `cascade_delete`: `left`, `right`, `both`, or `none` (the side where it is `True`).
-- `sort`: `left|right (<TO>): <TO>::field#id ascending|descending`, one per line, or `none`.
+- `sort`: `left|right (<TO>): <TO>::field#id ascending|descending`, one per line, or `none` A side is sorted only when its `SortList` has `value="True"`; each `Sort` holds `PrimaryField > Field`. A `Sort` inside `SortList value="False"` is not used: skip it.
 - `meaning`: one value, the first that fits in this order: `cartesian` (a `CartesianProduct` predicate), `constant` (both sides are fixed values: a calc of `1`, an auto-enter `ConstantData`, or a literal auto-enter calc; it matches every record; with a fixed value on one side only, it is `filter`), `global-match` (a global field on one side), `self-join` (both sides on one base table), `filter` (extra predicates or inequality), `identity` (a parent-child key match).
 - `fk_candidate`: `yes`, `no`, or `needs-profile`. `yes` needs one side shown unique: a `Unique` validation, a serial auto-enter, or an auto-enter `Get ( UUID )` that the user cannot edit. Only `identity` and single-predicate `self-join` rows can be `yes`; others are `no`. The DDR does not show whether serial numbering is on, so a serial alone gives `needs-profile`, not `yes`. Equality on a key whose uniqueness the DDR cannot show is `needs-profile`.
 

@@ -208,30 +208,39 @@ Path: `File > RelationshipGraph > RelationshipList > Relationship`
 
 ```xml
 <Relationship id="3">
-  <LeftTable id="..." name="Contacts"/>
-  <RightTable id="..." name="Sales"/>
+  <LeftTable cascadeCreate="False" cascadeDelete="False" name="Contacts">
+    <SortList Maintain="True" value="False" />
+  </LeftTable>
+  <RightTable cascadeCreate="True" cascadeDelete="False" name="Contacts_Sales">
+    <SortList Maintain="True" value="True">
+      <Sort type="Descending">
+        <PrimaryField>
+          <Field table="Contacts_Sales" id="..." name="SaleDate" />
+        </PrimaryField>
+      </Sort>
+    </SortList>
+  </RightTable>
   <JoinPredicateList>
     <JoinPredicate type="Equal">
       <LeftField>
-        <Field id="..." name="_zkp_Contact_id"/>
+        <Field table="Contacts" id="..." name="_zkp_Contact_id"/>
       </LeftField>
       <RightField>
-        <Field id="..." name="_zfk_Contact_id"/>
+        <Field table="Contacts_Sales" id="..." name="_zfk_Contact_id"/>
       </RightField>
     </JoinPredicate>
   </JoinPredicateList>
-  <LeftOptions deleteRelated="False" createRelated="False">
-    <SortList/>
-  </LeftOptions>
-  <RightOptions deleteRelated="False" createRelated="True">
-    <SortList>
-      <Sort type="Ascending">
-        <Field name="..."/>
-      </Sort>
-    </SortList>
-  </RightOptions>
 </Relationship>
 ```
+
+This is the shape a FileMaker 22.0.7 DDR writes. The relationship options are on the table sides:
+
+- `cascadeCreate="True"` on a side: "Allow creation of records in this table via this relationship" for that side's table. The parser emits `allow_create`.
+- `cascadeDelete="True"` on a side: "Delete related records in this table when a record is deleted in the other table". The parser emits `delete_related`.
+- `SortList value="True"`: the related records on that side are sorted. Each `Sort` has `type` (`Ascending` or `Descending`) and a `PrimaryField > Field`, in sort order. The parser emits `sort` as `[{field, order}]`.
+- `SortList value="False"`: not sorted. The `SortList` can still hold an old `Sort` child; ignore it.
+
+The parser puts these keys under `left_options` and `right_options`. It also reads a `LeftOptions deleteRelated=".." createRelated=".."` / `RightOptions` form when a side has no `cascade*` attributes. No real DDR seen so far uses that form.
 
 **Important**: Left/Right table names are **occurrence names**, not base table names. Resolve to base tables using the occurrence mapping.
 

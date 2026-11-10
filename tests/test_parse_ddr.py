@@ -111,6 +111,8 @@ EXPECTED_RELATIONSHIPS = [
         "left_table": "Intakes",
         "right_table": "LINE_ITEMS_Restitution",
         "predicates": [{"operator": "Equal", "left_field": "ID", "right_field": "Intake_ID"}],
+        # <LeftTable cascadeCreate="True">: the flag lives on the table side.
+        "left_options": {"allow_create": True},
         "source_file": SRC,
     }
 ]
@@ -661,6 +663,52 @@ class GoldenFixtureTest(unittest.TestCase):
                 if step["id"] == step_id:
                     return step
         self.fail(f"step {step_id} missing from fixture output")
+
+
+REL_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures",
+                           "relationship_options.xml")
+
+
+class RelationshipOptionsTest(unittest.TestCase):
+    """Relationship options come from LeftTable/RightTable, not LeftOptions.
+
+    FileMaker 22 writes <LeftTable cascadeCreate=".." cascadeDelete=".."> with a
+    <SortList value=".."><Sort type=".."><PrimaryField><Field/> inside. The parser
+    read only <LeftOptions deleteRelated createRelated>, so allow_create,
+    delete_related and sort were always lost.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with contextlib.redirect_stdout(io.StringIO()):
+            ddr = parse_ddr.DDRFile(REL_FIXTURE)
+            cls.rels = {r["id"]: r for r in ddr._parse_relationships()}
+
+    def test_table_side_flags_and_sort_are_read(self):
+        r = self.rels["10"]
+        self.assertNotIn("left_options", r)
+        self.assertEqual(r["right_options"], {
+            "delete_related": True,
+            "allow_create": True,
+            "sort": [
+                {"field": "row_number", "order": "Ascending"},
+                {"field": "planted_on", "order": "Descending"},
+            ],
+        })
+
+    def test_sortlist_value_false_is_not_a_sort(self):
+        r = self.rels["11"]
+        self.assertEqual(r["left_options"], {"allow_create": True})
+        self.assertNotIn("right_options", r)
+
+    def test_legacy_left_right_options_still_read(self):
+        r = self.rels["12"]
+        self.assertNotIn("left_options", r)
+        self.assertEqual(r["right_options"], {
+            "delete_related": True,
+            "allow_create": True,
+            "sort": [{"field": "row_number", "order": "Descending"}],
+        })
 
 
 class _StubDDR:
