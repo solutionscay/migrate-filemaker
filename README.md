@@ -87,4 +87,4 @@ python3 -m unittest discover -s tests
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
