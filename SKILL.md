@@ -67,6 +67,7 @@ python3 "$SKILL_DIR/scripts/catalog_contract.py" assign --agents 20 --output "$O
 ```
 
 - `assign` packs whole batches into agents of near-equal lines; one TSV per agent. About 20,000 object lines is a fair share for one agent: on a 4,500-object solution that took 22 agents of 4 to 10 minutes each. Pack one explorer per agent where you can, so each agent reads one workflow.
+- When the two rules conflict, apply them in this order. First, keep one explorer per agent. Second, merge small explorers into one agent only when each is far below the fair share. Third, split one explorer across agents only when it is far above the fair share.
 - Each agent proves its own share with `verify --catalog ... --csv-root ... --assignment <its tsv>` before it reports. `verify` takes one catalog and checks only that catalog's batches in the TSV. Run it once for each catalog in the TSV's `catalog` column.
 - An agent may use a helper script to pre-fill mechanical columns (counts, callers, census lines). It still reads each object and writes the meaning, purpose and target columns itself.
 - Ask each agent to report skill problems it hit. Fix the workflow before the next run, not during one: a changed object file changes its hash and voids its row.
