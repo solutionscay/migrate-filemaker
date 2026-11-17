@@ -8,6 +8,7 @@ Cite evidence as object file paths: `objects/<file>/<kind>/<id>-<name>.txt`.
 |---|---|
 | DDR export (folder, date, FileMaker version) |  |
 | Object files (`objects/index.tsv` rows) |  |
+| Separators skipped (`-` layouts and scripts, no object file) | <!-- copy the separators-skipped line from the explode_ddr.py output --> |
 | Extraction errors | <!-- none, or what explode_ddr.py reported --> |
 
 ## Application profile
@@ -25,6 +26,7 @@ Cite evidence as object file paths: `objects/<file>/<kind>/<id>-<name>.txt`.
 | Custom menus / menu sets |  |  |
 
 Take each count from `tail -n +2 objects/index.tsv | cut -f1,2 | sort | uniq -c`.
+Summary.xml counts separators as layouts and scripts. `index.tsv` does not. The difference is the separators-skipped count.
 
 ## Files and references
 
