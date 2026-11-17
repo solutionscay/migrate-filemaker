@@ -198,6 +198,12 @@ def text_markers(text):
     return found + [(m, False) for m in MARKER.findall((text or "")[pos:])]
 
 
+def _bare(text):
+    """Calculation or constant text without outer space and quotes, to compare the two."""
+    t = (text or "").strip()
+    return t[1:-1] if len(t) > 1 and t[0] == t[-1] == '"' else t
+
+
 class Catalog:
     """Ids of one <File>, read before rendering so references can be checked."""
 
@@ -505,8 +511,18 @@ class Renderer:
             if v == "False" and child is not None \
                     and (len(child) or (child.text or "").strip() or child.attrib):
                 off.add(child.tag)
-        if el.get("constant") == "True":
-            off.discard("Calculation")  # the DDR mirrors a constant as a Calculation
+        calc = el.find("Calculation")
+        if el.tag == "AutoEnter" and calc is not None:
+            if el.get("constant") == "True":
+                # The DDR can mirror a constant as a Calculation. Other text is a stale formula.
+                const = el.find("ConstantData")
+                if _bare(calc.text) == _bare(const.text if const is not None else ""):
+                    off.discard("Calculation")
+                else:
+                    off.add("Calculation")
+            elif "calculation" not in el.attrib and el.get("value") \
+                    and "calc" not in el.get("value").lower():
+                off.add("Calculation")  # another value type is chosen, so the formula is off
         return off
 
     def display_formats(self, el):
@@ -1019,7 +1035,9 @@ class Exploder:
             "- `(inactive)` marks a setting the DDR keeps while its option is off, for example an",
             "  auto-enter calculation with `calculation=False`, or a validation value list with",
             "  `valuelist=False`. FileMaker does not run or check it. The option flag shows `False`",
-            "  beside it.",
+            "  beside it. Under `constant=True`, a Calculation whose text is not the constant is",
+            "  an old formula and is `(inactive)`. So is a Calculation with no `calculation=` flag",
+            "  when `value=` names another type.",
             "- `refs:` lists the fields (`TO::field#id`), custom functions (`cf:`) and functions",
             "  (`fn:`) a calculation uses.",
             "- In a script, a step option shows only its `refs:` line when the step text already",
