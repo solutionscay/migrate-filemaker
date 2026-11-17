@@ -65,3 +65,11 @@ python3 "$SKILL_DIR/scripts/catalog_contract.py" verify \
 ```
 
 It fails on a missing object, an unknown object, a duplicate row, a changed hash, a row outside its `output_file`, a CSV without `source_id`/`source_hash`, and a catalog that no longer matches the current `index.tsv`. An artifact may say an explorer is complete only after this passes.
+
+With `--assignment <tsv>`, `verify` checks only the batches of the one `--catalog` you give. A TSV can hold batches from more than one catalog. Run `verify` once for each catalog in its `catalog` column:
+
+```bash
+for c in $(tail -n +2 "$TSV" | cut -f1 | sort -u); do
+  python3 "$SKILL_DIR/scripts/catalog_contract.py" verify --catalog "$c" --csv-root "$CSV_ROOT" --assignment "$TSV"
+done
+```
