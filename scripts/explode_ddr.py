@@ -214,8 +214,10 @@ class Catalog:
         self.tos = {t.get("name"): t for t in file_el.iterfind("RelationshipGraph/TableList/Table")}
         self.to_by_id = {t.get("id"): t for t in self.tos.values()}
         self.to_ids = set(self.to_by_id)
-        self.scripts, self.script_seps = self._items("ScriptCatalog", "Script", "StepList/Step")
-        self.layouts, self.layout_seps = self._items("LayoutCatalog", "Layout", ".//Object")
+        self.scripts, self.script_seps, self.script_folders = \
+            self._items("ScriptCatalog", "Script", "StepList/Step")
+        self.layouts, self.layout_seps, self.layout_folders = \
+            self._items("LayoutCatalog", "Layout", ".//Object")
         self.data_sources = {}
         for ds in file_el.iterfind("ExternalDataSourcesCatalog/*"):
             self.data_sources[ds.get("id")] = ds
@@ -228,7 +230,7 @@ class Catalog:
         }
 
     def _items(self, cat_tag, item_tag, content):
-        ids, seps = set(), set()
+        ids, seps, folders = set(), set(), set()
 
         # Walk the catalog and its folders only. A <Script> inside a step is a call to
         # a script, not a script; counting it hid every call to a deleted script.
@@ -236,7 +238,7 @@ class Catalog:
             for it in node:
                 if it.tag != item_tag:
                     if it.tag == "Group":
-                        ids.add(it.get("id"))  # privilege sets list folders by id too
+                        folders.add(it.get("id"))  # only privilege sets name a folder by id
                     walk(it)
                 elif it.get("name") == "-" and it.find(content) is None:
                     seps.add(it.get("id"))
@@ -248,7 +250,7 @@ class Catalog:
         cat = self.el.find(cat_tag)
         if cat is not None:
             walk(cat)
-        return ids, seps
+        return ids, seps, folders - ids
 
     def table_path(self, table_id):
         return f"{self.slug}/tables/{table_id}-{slug(self.tables.get(table_id))}.txt"
@@ -339,7 +341,7 @@ class Renderer:
             if status == "marker":
                 explain([MARKER_NAME.search(name).group()])
         for tag, _id, _name, status in rows:
-            if status == "missing":
+            if status in ("missing", "folder"):
                 explain(PRINTS_AS.get(tag, ()))
         self.unresolved += [("StepText", "", marker, "marker") for marker in shown]
 
@@ -367,7 +369,7 @@ class Renderer:
     # ── references ───────────────────────────────────────────────────────────
 
     def ref_status(self, el, parent):
-        """None when the reference resolves; else none / missing / separator / external."""
+        """None when the reference resolves; else none / missing / separator / folder / external."""
         tag, oid, name = el.tag, el.get("id"), el.get("name")
         cat = self.cat
         if tag in ("LeftTable", "RightTable"):
@@ -419,7 +421,18 @@ class Renderer:
             return "separator"
         if tag in ("Script", "Layout") and name == "--" and parent is not None and parent.tag != "Step":
             return None  # a privilege set's end-of-folder marker, not an object
-        return None if oid in ids else "missing"
+        if oid in ids:
+            return None
+        if oid in (cat.script_folders if tag == "Script" else cat.layout_folders if tag == "Layout" else ()):
+            return None if self.in_privilege_set(el) else "folder"
+        return "missing"
+
+    def in_privilege_set(self, el):
+        while el is not None:
+            if el.tag == "PrivilegeSet":
+                return True
+            el = self.parent.get(el)
+        return False
 
     def field_reference_status(self, el):
         """A field by id on the occurrence named by its child. A deleted occurrence gets its
@@ -1056,6 +1069,8 @@ class Exploder:
             "- `ref=missing`: the target is not in its catalog (deleted in the source), or the",
             "  reference has no catalog to check and FileMaker names it with a marker.",
             "- `ref=separator`: the id is a `-` separator, which has no object file.",
+            "- `ref=folder`: the id is a layout or script folder, not a layout or script. Only a",
+            "  privilege set can name a folder. A step cannot go to a folder: treat it as missing.",
             "- `ref=external`: the target file is not in this DDR set.",
             "- `in=<file>`: the target is in another file of the set.",
             "- A table occurrence header and each relationship side give `base=` the path of",
